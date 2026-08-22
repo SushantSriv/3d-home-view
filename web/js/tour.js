@@ -10,6 +10,14 @@
 
 import { renderFloorPlan, bearingBetween } from './floorplan.js';
 import { BUCKETS } from './config.js';
+import {
+  ASSUMED_CAMERA_HEIGHT_M,
+  floorDistance,
+  pitchForDistance,
+  roomWidthFromArea,
+  ringsFor,
+  formatDistance,
+} from './scale.js';
 
 const params = new URLSearchParams(location.search);
 const els = {
@@ -22,6 +30,8 @@ const els = {
   actions: document.getElementById('actions'),
   copy: document.getElementById('copy'),
   next: document.getElementById('next'),
+  scale: document.getElementById('scale'),
+  measure: document.getElementById('measure'),
 };
 
 let tour = null;
@@ -112,11 +122,29 @@ const hideMessage = () => els.msg.classList.add('hidden');
       enterRoom(list[(i + 1) % list.length].id);
     };
 
+    els.scale.onclick = () => setScale(!scaleOn, tour.rooms.find((r) => r.id === currentId));
+    // ?scale=1 opens with distances already showing, so a link can be shared that
+    // way for someone who cares about size more than about the view.
+    if (params.get('scale') !== null) scaleOn = true;
+
     window.addEventListener('keydown', (ev) => {
       if (ev.key === 'ArrowRight' || ev.key === 'n') els.next.click();
+      if (ev.key === 's' || ev.key === 'S') els.scale.click();
+    });
+
+    // Dragging the panorama ends in a click too, so only treat it as a tap when
+    // the pointer barely moved - otherwise every look around measures something.
+    let downAt = null;
+    els.pano.addEventListener('pointerdown', (ev) => (downAt = [ev.clientX, ev.clientY]));
+    els.pano.addEventListener('click', (ev) => {
+      if (!downAt) return;
+      const moved = Math.hypot(ev.clientX - downAt[0], ev.clientY - downAt[1]);
+      downAt = null;
+      if (moved <= 6) onPanoClick(ev);
     });
 
     await enterRoom(rooms[0].id);
+    if (scaleOn) setScale(true, tour.rooms.find((r) => r.id === currentId));
   } catch (err) {
     console.error(err);
     showMessage('Something went wrong', `<p class="muted">${err.message}</p>`);
@@ -159,6 +187,8 @@ async function enterRoom(roomId) {
 
   renderTag(room);
   renderDock();
+  if (scaleOn) showMeasureHint();
+  else els.measure.classList.add('hidden');
 
   mountViewer(panoramaUrl, {
     // A panorama photo covers a band, not a sphere. Telling Pannellum the real
@@ -179,12 +209,20 @@ async function enterRoom(roomId) {
       clickHandlerFunc: () => enterRoom(target.id),
     })),
   });
+
+  if (scaleOn) viewer.on('load', () => drawRings(room));
 }
 
 function renderTag(room) {
   const list = viewable();
   const parts = [];
-  if (room.dimensions_m2) parts.push(`${room.dimensions_m2} m&sup2;`);
+  if (room.dimensions_m2) {
+    parts.push(`${room.dimensions_m2} m&sup2;`);
+    // A characteristic size, not a measurement: the area is real but the shape is
+    // not known, so this is deliberately hedged and rounded to half a metre.
+    const across = roomWidthFromArea(Number(room.dimensions_m2));
+    if (across) parts.push(`about ${(Math.round(across * 2) / 2).toFixed(1)} m across`);
+  }
   parts.push(`room ${list.findIndex((r) => r.id === room.id) + 1} of ${list.length}`);
   els.tag.innerHTML =
     `<div class="rm">${escapeHtml(room.label)}</div>` +
@@ -327,6 +365,122 @@ function showSinglePanorama(url) {
   els.dock.classList.add('hidden');
   els.tag.innerHTML = `<div class="rm">Panorama preview</div><div class="sz mono">${escapeHtml(url)}</div>`;
   mountViewer(url);
+}
+
+/* ------------------------------------------------------------------ scale */
+
+/**
+ * Real distances, from the floor.
+ *
+ * See scale.js for why this works at all. The short of it: the panorama itself
+ * has no scale, but the floor is a plane at a known height below the camera, so
+ * a depression angle converts straight into metres. Everything here is that one
+ * identity, wearing a user interface.
+ */
+let scaleOn = false;
+let ringIds = [];
+let measureTimer = 0;
+
+/** Yaws at which to label a ring, kept inside what the panorama actually covers. */
+function ringBearings(room) {
+  const haov = room.haov ?? 360;
+  if (haov >= 359.9) return [0, 60, 120, 180, 240, 300];
+  const half = haov / 2 - 6;
+  const out = [];
+  for (let y = -half; y <= half + 0.001; y += Math.max(30, (2 * half) / 4)) out.push(y);
+  return out;
+}
+
+function clearRings() {
+  for (const id of ringIds) {
+    try { viewer?.removeHotSpot(id); } catch { /* viewer already torn down */ }
+  }
+  ringIds = [];
+}
+
+function drawRings(room) {
+  clearRings();
+  if (!scaleOn || !viewer) return;
+
+  const vaov = room.vaov ?? 180;
+  const vOffset = room.v_offset ?? 0;
+  const distances = ringsFor(vaov, vOffset);
+  if (!distances.length) return;
+
+  const bearings = ringBearings(room);
+  for (const metres of distances) {
+    const pitch = pitchForDistance(metres);
+    if (pitch == null || pitch < vOffset - vaov / 2 || pitch > vOffset + vaov / 2) continue;
+    for (const yaw of bearings) {
+      const id = `ring-${metres}-${Math.round(yaw)}`;
+      viewer.addHotSpot({
+        id,
+        pitch,
+        yaw,
+        cssClass: 'hs-ring',
+        // Pannellum hands the hotspot's own div to this hook, so the label rides
+        // on the marker as a data attribute rather than becoming a hover tooltip
+        // - there is no hovering on a phone.
+        createTooltipFunc: (div) => {
+          div.dataset.m = `${metres} m`;
+        },
+      });
+      ringIds.push(id);
+    }
+  }
+}
+
+function setScale(on, room) {
+  scaleOn = on;
+  els.scale?.classList.toggle('on', scaleOn);
+  if (els.scale) els.scale.textContent = scaleOn ? 'Hide scale' : 'Scale';
+  if (!scaleOn) {
+    els.measure.classList.add('hidden');
+    clearRings();
+  } else {
+    if (room) drawRings(room);
+    showMeasureHint();
+  }
+}
+
+function showMeasureHint() {
+  clearTimeout(measureTimer);
+  els.measure.innerHTML =
+    `<b>Tap the floor</b> to measure from where the camera stood` +
+    `<i>assumes the phone was held about ${ASSUMED_CAMERA_HEIGHT_M.toFixed(2)} m up</i>`;
+  els.measure.classList.remove('hidden');
+}
+
+/**
+ * Turn a tap into a distance.
+ *
+ * Only the floor can answer: a ray at or above the horizon never meets it, and
+ * one just below meets it so far away that the number is meaningless, which is
+ * why floorDistance() refuses above -1.2 degrees rather than returning a very
+ * large number and looking confident about it.
+ */
+function onPanoClick(ev) {
+  if (!scaleOn || !viewer) return;
+  let coords;
+  try {
+    coords = viewer.mouseEventToCoords(ev);
+  } catch {
+    return;
+  }
+  if (!coords) return;
+  const [pitch] = coords;
+  const metres = floorDistance(pitch);
+
+  clearTimeout(measureTimer);
+  els.measure.classList.remove('hidden');
+  if (metres == null) {
+    els.measure.innerHTML =
+      `That is at or above eye level<i>only the floor can be measured this way</i>`;
+  } else {
+    els.measure.innerHTML =
+      `<b>${formatDistance(metres)}</b> away<i>floor, from where the camera stood</i>`;
+  }
+  measureTimer = setTimeout(() => showMeasureHint(), 4000);
 }
 
 /* ------------------------------------------------------------------ utils */

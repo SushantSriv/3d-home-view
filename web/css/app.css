@@ -385,3 +385,32 @@ hr.sep { border: 0; border-top: 1px solid var(--line); margin: 1rem 0; }
   background: rgba(255, 255, 255, .04);
 }
 .cap-bar .cap-cancel { margin-right: auto; }
+
+/* ------------------------------------------------------------- scale ---
+   A panorama has no scale of its own; these show the one derived from the
+   floor (see js/scale.js). Deliberately quiet - a buyer looking at a room
+   should see the room, with the measurements available rather than imposed. */
+.tour-measure {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: calc(1rem + env(safe-area-inset-bottom)); z-index: 25;
+  padding: .5rem .85rem; border-radius: 10px; text-align: center;
+  background: rgba(18, 20, 26, .86); color: #fff; backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, .12);
+  font-size: .86rem; line-height: 1.35; max-width: min(24rem, calc(100vw - 2rem));
+}
+.tour-measure b { font-size: 1.05rem; }
+.tour-measure i { display: block; font-style: normal; opacity: .6; font-size: .72rem; margin-top: .15rem; }
+.tour-actions .btn.on { background: #35d07f; border-color: #35d07f; color: #06070a; }
+
+/* Ring markers sit on the floor at a known distance. The dot is the anchor;
+   the label rides just under it so the number does not cover the floor. */
+.hs-ring {
+  width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px;
+  border-radius: 50%; background: rgba(255, 255, 255, .9);
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, .45);
+}
+.hs-ring::after {
+  content: attr(data-m); position: absolute; top: 12px; left: 50%;
+  transform: translateX(-50%); white-space: nowrap;
+  font-size: .7rem; color: #fff; text-shadow: 0 1px 3px rgba(0, 0, 0, .9);
+}

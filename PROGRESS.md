@@ -471,6 +471,43 @@ Measured against the real panorama, frames synthesised at known angles:
 Rotation was identified correctly in every case at score 0.99, and the horizontal
 field of view recovered as 40.8° against a true 40.8°.
 
+### Real scale on a panorama, from the floor
+
+Asked for: *"based on the room size would it be possible to scale that tour?"*,
+after settling on the single-panorama path as the one that gives good quality —
+partial rotation accepted.
+
+**A single-viewpoint panorama records directions, not distances.** Nothing in the
+pixels says whether a wall is two metres away or twenty. What rescues it is the
+floor: it is a known plane a known height below the camera, so a floor point seen
+at depression angle φ is exactly `d = h / tan(φ)` away. The only assumption is `h`,
+and the capture instructions already ask for the phone at chest height. Get `h`
+wrong by 10% and every distance is 10% out — which is what "roughly" buys.
+
+`web/js/scale.js` holds the geometry; the viewer gains a **Scale** toggle (key `S`,
+or `?scale=1` on the link) that draws distance rings on the floor and lets a tap
+report the distance to that spot. The room tag also reads "30 m² · about 5.5 m
+across" — hedged deliberately, because the area is real but the shape is not known.
+
+**A sign error caught by testing.** The first version had a `floorReach()` that
+claimed to give the *farthest* visible floor point. It is the *nearest*: distance
+and depression angle run opposite ways, so the bottom edge of the image — the
+steepest angle down — is the closest the floor comes to being seen, and everything
+beyond lies higher up. The practical consequence is a **blind circle underfoot**: a
+68°-tall band from 1.45 m cannot see the floor within about 2.1 m, so the rings
+have to start outside it. The original code offered a 1 m ring, the one distance
+that is certainly not visible.
+
+Checked against the live room (30 m², vaov 68°, vOffset 0): blind circle 2.15 m,
+walls about 2.74 m away, so the floor–wall junction should appear 27.9° below the
+horizon — 82% of the way down the image, comfortably inside the band. Rings offered:
+2.5, 3, 4, 5 m, all outside the blind circle.
+
+Geometry is unit-tested (identity checks at 45°, the tan=0.5 case, round trips, and
+four different panorama geometries). **The ring rendering has not yet been seen in a
+live viewer** — the property is currently unpublished, and I did not toggle that,
+since the share link is outward-facing.
+
 ### Reproducing
 
 ```powershell
@@ -482,6 +519,11 @@ field of view recovered as 40.8° against a true 40.8°.
 
 ## 7. Changelog
 
+- **2026-08-22 (scale)** — Guided capture set aside; the single-panorama path gives the
+  better image and partial rotation is accepted. Added real distances derived from the
+  floor plane: a Scale toggle drawing distance rings, tap-to-measure, and a rough
+  across-the-room figure from m². Testing caught a near/far inversion that would have put
+  the rings inside the blind circle underfoot.
 - **2026-08-22 (capture, corrected)** — First real capture came out badly overlapped. Chief
   cause: the assumed 65° field of view is a *long-axis* figure, and a portrait phone frame is
   only ~41° across, so every frame was drawn 1.56× too wide. Also bound two orientation event
