@@ -46,6 +46,19 @@ jobs:
           fi
           # Belt and braces: Pages must never try to run Jekyll over this.
           touch _site/.nojekyll
+
+          # Cache-bust our own scripts and styles. GitHub Pages serves them with
+          # max-age=600, so without this a visitor keeps running the previous
+          # deploy's JavaScript for ten minutes after a fix goes out - which is
+          # indistinguishable from the fix not working. Stamp the commit sha onto
+          # every local .js/.css reference in our HTML and our own modules. We do
+          # not rewrite *inside* vendor/ - it is minified third-party code and we
+          # have no business editing it - though references to it get stamped.
+          V="${GITHUB_SHA::8}"
+          sed -i -E "s#(['\"])([A-Za-z0-9_./-]+\.(js|css))(['\"])#\1\2?v=${V}\4#g" \
+            _site/*.html _site/js/*.js
+          echo "stamped assets with ?v=${V}"
+          grep -o 'src="js/[^"]*"' _site/tour.html
           ls -la _site
 
       - name: Guard against a leaked service key

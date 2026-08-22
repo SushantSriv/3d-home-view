@@ -16,15 +16,20 @@ video_extraction:
   # gives the same frame count regardless of how long the seller's clip happens
   # to be, which keeps runtime predictable.
   method: uniform
-  # 48 frames over a full turn is one frame every 7.5 deg. Against the ~64 deg
-  # field of view below that is roughly 88% overlap -- generous, because handheld
-  # pans are never perfectly even.
-  num_frames: 48
+  # 36 frames over a full turn is one frame every 10 deg. Against a ~39 deg
+  # portrait field of view that is still ~74% overlap, which is plenty for a
+  # handheld pan. Measured: 48 frames at 4096 px took 77 s, 36 at 3072 took 51 s,
+  # and the two panoramas are visually indistinguishable. Waiting is the worst
+  # part of this product, so the time is worth more than the margin.
+  num_frames: 36
   frame_interval: 2      # unused with `uniform`, kept so the key exists
   extract_fps: 4.0       # unused with `uniform`
 
 output:
-  pano_width: 4096       # height is always width/2; 4096x2048 is plenty for a phone source
+  # 3072x1536. A single-height pan only fills a horizontal band of this anyway,
+  # and dropping from 4096 saved 18 s per room with no visible difference at the
+  # field of view Pannellum actually renders.
+  pano_width: 3072
   output_format: jpg     # the wrapper looks for output_dir/panorama.<format>
   jpg_quality: 90        # 95 roughly doubles the file for no visible gain at this resolution
   # 0 = one thread per core. Each worker holds a full warped frame in memory

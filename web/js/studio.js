@@ -18,6 +18,7 @@ const els = {
   newName: $('new-name'), newAddress: $('new-address'), newCancel: $('new-cancel'),
   plan: $('plan'), planFile: $('plan-file'), planHint: $('plan-hint'), addRoom: $('add-room'),
   publish: $('publish'), shareUrl: $('share-url'), shareCopy: $('share-copy'), shareOpen: $('share-open'),
+  sharebar: $('sharebar'), shareState: $('share-state'),
   pName: $('p-name'), pAddress: $('p-address'), pSave: $('p-save'), pDelete: $('p-delete'),
   rooms: $('rooms'), refresh: $('refresh'),
 };
@@ -167,8 +168,21 @@ async function reload() {
 function schedulePoll() {
   clearTimeout(pollTimer);
   const busy = videos.some((v) => v.processing_status === 'queued' || v.processing_status === 'processing');
-  if (busy) pollTimer = setTimeout(() => reload().catch(console.error), 10000);
+  if (busy) pollTimer = setTimeout(() => reload().catch(console.error), 5000);
 }
+
+/**
+ * A ticking "42s" next to each in-flight job. Without it a five-second poll that
+ * finds no change is indistinguishable from a page that has silently given up,
+ * which is exactly how the studio felt before.
+ */
+setInterval(() => {
+  const now = Date.now();
+  for (const el of document.querySelectorAll('.ago[data-since]')) {
+    const secs = Math.max(0, Math.round((now - Date.parse(el.dataset.since)) / 1000));
+    el.textContent = secs < 90 ? `${secs}s` : `${Math.round(secs / 60)} min`;
+  }
+}, 1000);
 
 /* ---------------------------------------------------------------- render */
 
@@ -209,9 +223,12 @@ function renderPlan() {
 
 function renderShare() {
   const url = db.shareUrl(property.share_slug);
+  const live = !!property.is_published;
   els.shareUrl.textContent = url;
   els.shareOpen.href = url;
-  els.shareUrl.style.opacity = property.is_published ? '1' : '.5';
+  els.shareState.textContent = live ? 'live' : 'draft';
+  els.shareState.className = `pill ${live ? 'done' : 'queued'}`;
+  els.sharebar.classList.toggle('draft', !live);
 }
 
 function renderRooms() {
@@ -244,9 +261,15 @@ function roomCard(room, i) {
     </div>
 
     <div class="field">
-      <label>Room video ${job ? '(replaces the current one)' : ''}</label>
-      <input class="f-video" type="file" accept="video/*">
-      <p class="muted" style="margin:.3rem 0 0;font-size:.78rem">
+      <label>Room video</label>
+      <div class="filepick">
+        <label class="btn sm">
+          <input class="f-video" type="file" accept="video/*" hidden>
+          ${room.panorama_url ? 'Replace video' : 'Choose video'}
+        </label>
+        <span class="fname muted"></span>
+      </div>
+      <p class="muted" style="margin:.35rem 0 0;font-size:.78rem">
         Phone held <strong>upright</strong>, one slow full turn, 20&ndash;30 s, standing still.
       </p>
     </div>
@@ -261,19 +284,33 @@ function roomCard(room, i) {
       <p class="muted">Usually this means too little overlap between frames. Re-record with a slower,
       steadier pan of 20&ndash;30 seconds and upload again.</p></div>`;
   } else if (job?.processing_status === 'queued') {
-    jobBox.innerHTML = `<p class="muted">Waiting for a stitching worker. Start one locally with
-      <span class="mono">worker/run_local.ps1</span>, or wait for the scheduled cloud run.</p>`;
+    jobBox.innerHTML = `<div class="progress indeterminate"><i></i></div>
+      <p class="muted">Waiting for a stitching worker
+        &mdash; <span class="ago" data-since="${job.created_at}"></span>.
+        A worker picks this up within about 5 minutes, or immediately if you are running
+        <span class="mono">worker/run_local.ps1</span>. You can close this page; it keeps going.</p>`;
   } else if (job?.processing_status === 'processing') {
-    jobBox.innerHTML = `<p class="muted">Stitching now. This takes a few minutes per room.</p>`;
+    jobBox.innerHTML = `<div class="progress indeterminate"><i></i></div>
+      <p class="muted">Stitching &mdash; <span class="ago" data-since="${job.claimed_at || job.created_at}"></span>
+        so far. Typically about a minute.</p>`;
   }
 
   if (room.panorama_url) {
-    const img = document.createElement('img');
-    img.className = 'thumb';
-    img.loading = 'lazy';
-    img.src = db.publicUrl(BUCKETS.panoramas, room.panorama_url);
-    img.alt = `Panorama of ${room.label}`;
-    jobBox.append(img);
+    const done = document.createElement('div');
+    // Cache-bust: re-stitching a room overwrites the same storage key, so without
+    // this the studio keeps showing the previous panorama from the browser cache.
+    const src = `${db.publicUrl(BUCKETS.panoramas, room.panorama_url)}?t=${
+      job?.finished_at ? Date.parse(job.finished_at) : ''
+    }`;
+    done.innerHTML = `
+      <img class="thumb" loading="lazy" src="${src}" alt="Panorama of ${esc(room.label)}">
+      <div style="margin-top:.5rem">
+        <a class="btn sm primary" target="_blank" rel="noopener"
+           href="tour.html?t=${encodeURIComponent(property.share_slug)}">Open the tour</a>
+        <a class="btn sm" target="_blank" rel="noopener"
+           href="tour.html?pano=${encodeURIComponent(src)}">Just this room</a>
+      </div>`;
+    jobBox.append(done);
   }
 
   // --- field handlers
@@ -310,7 +347,9 @@ function roomCard(room, i) {
 
 async function uploadVideo(room, input) {
   const file = input.files[0];
+  const name = input.closest('.filepick')?.querySelector('.fname');
   if (!file) return;
+  if (name) name.textContent = `${file.name} (${(file.size / 1048576).toFixed(0)} MB)`;
 
   if (file.size > LIMITS.maxVideoBytes) {
     input.value = '';
@@ -329,12 +368,28 @@ async function uploadVideo(room, input) {
     );
   }
 
-  flash(`Uploading "${file.name}"...`);
-  const path = await db.uploadRoomVideo(property.id, room.id, file);
-  await db.enqueueVideo(room.id, path, { durationSeconds: duration, sizeBytes: file.size });
-  input.value = '';
+  // Show the bar in the room's own card rather than the page-level flash, so it
+  // is obvious which room is uploading when several are on the go.
+  const jobBox = input.closest('.room-item').querySelector('.job');
+  jobBox.innerHTML = `<div class="progress"><i></i></div><p class="muted">Starting upload&hellip;</p>`;
+  const bar = jobBox.querySelector('.progress > i');
+  const note = jobBox.querySelector('p');
+  const mb = file.size / 1048576;
+
+  try {
+    const path = await db.uploadRoomVideo(property.id, room.id, file, (frac) => {
+      const pct = Math.round(frac * 100);
+      bar.style.width = `${pct}%`;
+      note.textContent = `Uploading ${mb.toFixed(0)} MB — ${pct}%`;
+    });
+    note.textContent = 'Upload complete. Queueing…';
+    await db.enqueueVideo(room.id, path, { durationSeconds: duration, sizeBytes: file.size });
+  } finally {
+    input.value = '';
+  }
+
   await reload();
-  flash(`Queued "${room.label}" for stitching.`, 'ok');
+  flash(`"${room.label}" is queued. You can keep adding rooms, or close this page.`, 'ok');
 }
 
 /** Read a clip's duration without uploading it, so we can reject hopeless ones early. */

@@ -173,15 +173,41 @@ export async function enqueueVideo(roomId, storagePath, meta = {}) {
  * the raw-videos bucket is deliberately a write-only drop box with an INSERT-only
  * policy. Sending upsert there fails with a row-level-security violation.
  */
-async function upload(bucket, path, file, onProgress) {
-  const { error } = await sb.storage.from(bucket).upload(path, file, {
-    cacheControl: '3600',
-    upsert: false,
-    contentType: contentTypeOf(file),
+/**
+ * Uploaded via raw XHR rather than supabase-js, purely to get upload progress:
+ * the client library returns a promise with no progress events, and a seller
+ * pushing 30 MB over a phone connection deserves better than a frozen button.
+ * The endpoint and headers are exactly what supabase-js would have sent.
+ */
+function upload(bucket, path, file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${SUPABASE_URL}/storage/v1/object/${bucket}/${path}`);
+    xhr.setRequestHeader('apikey', SUPABASE_ANON_KEY);
+    xhr.setRequestHeader('Authorization', `Bearer ${SUPABASE_ANON_KEY}`);
+    xhr.setRequestHeader('Content-Type', contentTypeOf(file));
+    xhr.setRequestHeader('Cache-Control', '3600');
+
+    xhr.upload.onprogress = (ev) => {
+      if (ev.lengthComputable) onProgress?.(ev.loaded / ev.total);
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        onProgress?.(1);
+        return resolve(path);
+      }
+      // Storage reports failures as a JSON body; surface its message, not "400".
+      let message = `Upload failed (HTTP ${xhr.status})`;
+      try {
+        const body = JSON.parse(xhr.responseText);
+        message = body.message || body.error || message;
+      } catch { /* non-JSON body; keep the status message */ }
+      reject(new Error(message));
+    };
+    xhr.onerror = () => reject(new Error('Failed to fetch'));
+    xhr.onabort = () => reject(new Error('Upload cancelled'));
+    xhr.send(file);
   });
-  if (error) throw error;
-  onProgress?.(1);
-  return path;
 }
 
 /**

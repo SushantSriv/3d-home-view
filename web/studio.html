@@ -52,6 +52,15 @@
 
       <!-- Editor ---------------------------------------------------------- -->
       <div id="editor" class="hidden">
+
+        <!-- Always-visible share bar: the answer to "where do I open it?" -->
+        <div id="sharebar" class="sharebar">
+          <span id="share-state" class="pill">draft</span>
+          <span id="share-url" class="url">&mdash;</span>
+          <button id="share-copy" class="btn sm">Copy link</button>
+          <a id="share-open" class="btn sm primary" target="_blank" rel="noopener">Open tour</a>
+        </div>
+
         <div class="studio-grid">
 
           <!-- left: plan -->
@@ -67,24 +76,26 @@
               </p>
               <div id="plan" class="floorplan"></div>
               <div class="field" style="margin-top:.7rem">
-                <label for="plan-file">Replace floor plan (PNG or JPG)</label>
-                <input id="plan-file" type="file" accept="image/*">
+                <label>Floor plan image (PNG or JPG)</label>
+                <div class="filepick">
+                  <label class="btn sm">
+                    <input id="plan-file" type="file" accept="image/*" hidden>
+                    Choose image
+                  </label>
+                  <span class="fname muted">A screenshot of the listing plan is fine.</span>
+                </div>
               </div>
             </div>
 
             <div class="card">
               <h2>Share</h2>
-              <div class="spread" style="margin-bottom:.6rem">
-                <label class="grow" style="margin:0;display:flex;gap:.5rem;align-items:center;cursor:pointer">
-                  <input id="publish" type="checkbox" style="width:auto">
-                  <span>Published &mdash; anyone with the link can view</span>
-                </label>
-              </div>
-              <div class="mono" id="share-url">&mdash;</div>
-              <div style="margin-top:.6rem">
-                <button id="share-copy" class="btn sm">Copy link</button>
-                <a id="share-open" class="btn sm" target="_blank" rel="noopener">Open tour</a>
-              </div>
+              <label class="grow" style="margin:0;display:flex;gap:.5rem;align-items:center;cursor:pointer">
+                <input id="publish" type="checkbox" style="width:auto">
+                <span>Published &mdash; anyone with the link can view, no login</span>
+              </label>
+              <p class="muted" style="margin:.5rem 0 0">
+                Unpublished tours show visitors a "not published yet" notice instead of the rooms.
+              </p>
             </div>
 
             <div class="card">

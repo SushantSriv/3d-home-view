@@ -269,3 +269,37 @@ body.viewer { height: 100dvh; overflow: hidden; }
 .spread { display: flex; align-items: center; gap: .5rem; }
 .spread .grow { flex: 1; min-width: 0; }
 hr.sep { border: 0; border-top: 1px solid var(--line); margin: 1rem 0; }
+
+/* ---- File pickers ----
+   The native <input type=file> renders its own "no file selected" text, which
+   reads as an error message once we clear the input after a successful upload.
+   Hide it behind a real button and say something useful next to it instead. */
+.filepick { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
+.filepick .btn { flex: none; }
+.filepick .fname { font-size: .8rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---- Progress ---- */
+.progress {
+  height: 6px; border-radius: 999px; overflow: hidden;
+  background: var(--bg); border: 1px solid var(--line); margin: .45rem 0 .3rem;
+}
+.progress > i {
+  display: block; height: 100%; width: 0;
+  background: var(--accent); transition: width .2s ease;
+}
+.progress.indeterminate > i {
+  width: 35%; background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation: slide 1.4s ease-in-out infinite;
+}
+@keyframes slide { 0% { margin-left: -35%; } 100% { margin-left: 100%; } }
+
+/* ---- Share bar ---- */
+.sharebar {
+  display: flex; align-items: center; gap: .6rem; flex-wrap: wrap;
+  background: var(--bg-elev); border: 1px solid var(--line);
+  border-left: 3px solid var(--ok);
+  border-radius: var(--radius); padding: .7rem .9rem; margin-bottom: 1rem;
+}
+.sharebar .url { flex: 1 1 260px; min-width: 0; font-family: var(--mono); font-size: .8rem;
+                 overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sharebar.draft { border-left-color: var(--warn); }
