@@ -107,8 +107,11 @@ def process(sb: Client, job: dict, *, delete_source: bool, keep_output: bool) ->
         print(f"[worker] DONE {label} -> {dest}", flush=True)
 
         if delete_source:
-            # Raw video is the single biggest consumer of the free storage tier and
-            # is of no use once the panorama exists.
+            # Off by default. The raw video is the biggest consumer of the free
+            # storage tier, but while the pipeline is still being tuned it is the
+            # only way to re-stitch a room with different settings - and throwing
+            # it away the moment a mediocre panorama appears is how you end up
+            # asking the seller to walk round the house again.
             sb.storage.from_(BUCKET_VIDEOS).remove([job["video_path"]])
             print("[worker] removed source video", flush=True)
 
@@ -165,7 +168,7 @@ def main() -> int:
 
     sb = connect()
     opts = {
-        "delete_source": not args.keep_source and env_flag("WORKER_DELETE_SOURCE", True),
+        "delete_source": not args.keep_source and env_flag("WORKER_DELETE_SOURCE", False),
         "keep_output": args.keep_output,
     }
 

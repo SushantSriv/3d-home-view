@@ -270,7 +270,9 @@ function roomCard(room, i) {
         <span class="fname muted"></span>
       </div>
       <p class="muted" style="margin:.35rem 0 0;font-size:.78rem">
-        Phone held <strong>upright</strong>, one slow full turn, 20&ndash;30 s, standing still.
+        Phone <strong>upright</strong> and held <strong>close to your chest</strong> &mdash; the phone
+        must spin, not orbit. Stand in the middle of the room and turn slowly on the spot,
+        <strong>one</strong> full turn in 20&ndash;30 s.
       </p>
     </div>
 

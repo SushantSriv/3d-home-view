@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import math
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -67,6 +68,81 @@ def horizontal_fov(width: int, height: int, long_axis_fov: float = LONG_AXIS_FOV
     return math.degrees(2 * math.atan((width / 2) / focal))
 
 
+# How far past 360 deg the measured sweep may go before we call it an over-pan.
+OVERPAN_TOLERANCE = 0.15
+
+# The pipeline reports the unwrapped yaw span it believes the pan covered, and
+# separately whether it proved the pan closed on itself. Together those two give
+# us a measured focal length.
+_SWEEP_RE = re.compile(r"circular closure \(total rotation:\s*([\d.]+)")
+_CLOSED_RE = re.compile(r"Closure validated|Circular closure detected")
+
+
+def _read_sweep(log: str) -> tuple[float | None, bool]:
+    match = _SWEEP_RE.search(log or "")
+    return (float(match.group(1)) if match else None, bool(_CLOSED_RE.search(log or "")))
+
+
+# The pipeline decomposes each frame-to-frame homography into a rotation. It logs
+# the raw determinant when that decomposition looks unhealthy: a pure rotation
+# gives ~1.0, and values well above it mean the homography was not a rotation at
+# all. The usual cause is the camera CHANGING POSITION as well as angle - turning
+# your body with the phone held out in front moves it through a ~30 cm arc, which
+# is enormous next to a sofa 1.5 m away. No single rotation can reconcile the near
+# and far objects, so the near ones get duplicated.
+_SUSPECT_RE = re.compile(r"det_raw=([\d.]+)")
+_FAILED_PAIRS_RE = re.compile(r"Some pairs failed to match \((\d+)/(\d+)")
+
+
+def _read_quality(log: str) -> dict:
+    dets = [float(d) for d in _SUSPECT_RE.findall(log or "")]
+    failed = _FAILED_PAIRS_RE.search(log or "")
+    return {
+        "suspect_pairs": len(dets),
+        "worst_det": max(dets) if dets else 1.0,
+        "failed_pairs": int(failed.group(1)) if failed else 0,
+        "total_pairs": int(failed.group(2)) if failed else 0,
+    }
+
+
+def describe_quality(q: dict) -> str | None:
+    """A sentence for the seller, or None when the clip looks healthy."""
+    if q["worst_det"] > 1.25 or q["suspect_pairs"] >= 5:
+        return (
+            "The camera moved through space as well as turning, so nearby objects appear more "
+            "than once. Stand still in one spot and turn on the spot with the phone held close "
+            "to your chest, not out at arm's length - the phone needs to spin, not orbit."
+        )
+    if q["failed_pairs"] and q["total_pairs"] and q["failed_pairs"] / q["total_pairs"] > 0.15:
+        return (
+            "Several parts of the pan could not be matched up, usually from panning too fast or "
+            "past a large blank wall. Turn more slowly and keep some furniture or edges in view."
+        )
+    return None
+
+
+def _run_pipeline(run_py: Path, config_path: Path, env: dict) -> subprocess.CompletedProcess:
+    proc = subprocess.run(
+        [sys.executable, str(run_py), str(config_path)],
+        cwd=str(UPSTREAM),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+    )
+    if proc.stdout:
+        print(proc.stdout, flush=True)
+    return proc
+
+
+def _clear_stale(out_dir: Path) -> None:
+    """Success is judged by "a panorama exists", so never leave an old one lying around."""
+    stale = _find_panorama(out_dir)
+    if stale is not None:
+        stale.unlink()
+
+
 class StitchError(RuntimeError):
     """Raised with a message meant to be shown to the seller, not to a developer."""
 
@@ -77,6 +153,7 @@ class StitchResult:
     output_dir: Path
     frames_used: int
     seconds: float
+    warning: str | None = None
 
 
 # --------------------------------------------------------------------- checks
@@ -178,16 +255,14 @@ def stitch(video: Path, out_dir: Path, **overrides) -> StitchResult:
         orientation = "portrait" if h > w else "landscape"
         print(f"[stitch] {orientation} frame -> horizontal fov {overrides['hfov']} deg", flush=True)
 
+
     print(f"[stitch] {video.name}: {seconds:.1f}s, {frames} frames, {w}x{h}", flush=True)
 
     config_path = build_config(video, out_dir, overrides)
 
-    # Remove any previous result first. Success is judged by "a panorama exists"
-    # below, so a leftover file from an earlier run would be reported as a fresh
-    # success for a stitch that actually failed.
-    stale = _find_panorama(out_dir)
-    if stale is not None:
-        stale.unlink()
+    # A leftover panorama from an earlier run would otherwise be reported as a
+    # fresh success for a stitch that actually failed.
+    _clear_stale(out_dir)
 
     # Run upstream as a subprocess rather than importing it: it manipulates sys.path
     # and configures the root logger, neither of which we want leaking into a
@@ -198,17 +273,29 @@ def stitch(video: Path, out_dir: Path, **overrides) -> StitchResult:
     # non-zero exit code.
     child_env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
 
-    proc = subprocess.run(
-        [sys.executable, str(run_py), str(config_path)],
-        cwd=str(UPSTREAM),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        env=child_env,
-    )
-    if proc.stdout:
-        print(proc.stdout, flush=True)
+    proc = _run_pipeline(run_py, config_path, child_env)
+
+    # --- diagnose the sweep -----------------------------------------------
+    #
+    # Note what this deliberately does NOT do: it does not back-solve the focal
+    # length from the sweep. That looks obvious and is wrong. Measured on a
+    # synthetic pan of known geometry (true horizontal FOV 38.7 deg), telling the
+    # pipeline 30/34/38.7/44/50 produced sweeps of 394/377/365/361/363 -- the
+    # curve bottoms out near 44 and turns back up, and the true FOV does not sit
+    # at the 360 crossing. Solving for "sweep == 360" would confidently converge
+    # on the wrong lens.
+    #
+    # What the sweep IS good for is spotting a pan that went round more than once,
+    # which is worth telling the seller about.
+    span, closed = _read_sweep(proc.stdout)
+    if span and span > 360.0 * (1 + OVERPAN_TOLERANCE):
+        turns = span / 360.0
+        print(
+            f"[stitch] the pan covered about {turns:.1f} turns ({span:.0f} deg)."
+            + (" Closure trimmed the surplus." if closed else
+               " No closure was found, so the surplus overlaps itself."),
+            flush=True,
+        )
 
     # Judge on the artefact, not the exit code. Upstream can die on a cosmetic
     # final print long after the panorama is safely on disk, and throwing away a
@@ -222,9 +309,21 @@ def stitch(video: Path, out_dir: Path, **overrides) -> StitchResult:
             flush=True,
         )
 
+    quality = _read_quality(proc.stdout)
+    warning = describe_quality(quality)
+    if warning:
+        print(f"[stitch] QUALITY: {warning}", flush=True)
+        print(
+            f"[stitch]   (worst homography determinant {quality['worst_det']:.2f}, "
+            f"{quality['suspect_pairs']} suspect pairs, "
+            f"{quality['failed_pairs']}/{quality['total_pairs'] or '?'} failed to match)",
+            flush=True,
+        )
+
     used = len(list((out_dir / "frames").glob("*"))) if (out_dir / "frames").exists() else 0
     print(f"[stitch] wrote {panorama} ({panorama.stat().st_size / 1e6:.1f} MB)", flush=True)
-    return StitchResult(panorama=panorama, output_dir=out_dir, frames_used=used, seconds=seconds)
+    return StitchResult(panorama=panorama, output_dir=out_dir, frames_used=used,
+                        seconds=seconds, warning=warning)
 
 
 def _find_panorama(out_dir: Path) -> Path | None:
