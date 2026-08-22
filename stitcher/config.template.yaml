@@ -1,0 +1,78 @@
+# Stitching defaults tuned for a handheld phone pan of a room.
+#
+# This is a TEMPLATE. stitch_room.py copies it, fills in `video` and `output_dir`
+# with absolute paths, applies any CLI overrides, and writes the result next to
+# the output. Upstream's own example config lives in
+# third_party/360-spherical-stitching/config.yaml and is aimed at tripod photos --
+# the values below differ from it deliberately, and why is written down each time.
+
+# Filled in by stitch_room.py -- do not set here.
+video: null
+output_dir: null
+
+video_extraction:
+  # Upstream defaults to `interval` with frame_interval 2, which on a 25 s clip at
+  # 30 fps yields ~375 frames: minutes of matching for no extra quality. `uniform`
+  # gives the same frame count regardless of how long the seller's clip happens
+  # to be, which keeps runtime predictable.
+  method: uniform
+  # 48 frames over a full turn is one frame every 7.5 deg. Against the ~64 deg
+  # field of view below that is roughly 88% overlap -- generous, because handheld
+  # pans are never perfectly even.
+  num_frames: 48
+  frame_interval: 2      # unused with `uniform`, kept so the key exists
+  extract_fps: 4.0       # unused with `uniform`
+
+output:
+  pano_width: 4096       # height is always width/2; 4096x2048 is plenty for a phone source
+  output_format: jpg     # the wrapper looks for output_dir/panorama.<format>
+  jpg_quality: 90        # 95 roughly doubles the file for no visible gain at this resolution
+  # 0 = one thread per core. Each worker holds a full warped frame in memory
+  # (~25 MB at 4096 px), so drop this to 2 on a small machine that starts swapping.
+  warp_workers: 0
+
+matching:
+  # Upstream matches at full resolution. Video frames are already soft compared to
+  # stills, so matching at 1280 px is nearly as accurate and several times faster.
+  match_full_res: false
+  match_width: 1280
+  # 200 inliers is a high bar for a blank Scandinavian wall. 90 still rejects
+  # genuinely bad pairs while tolerating a plain painted room.
+  min_inliers: 90
+  ratio_test_threshold: 0.72
+  symmetric_matching: false
+  ransac_refinement: true
+  ransac_max_iters: 6000
+  # Rolling-shutter video frames have less contrast than stills; CLAHE buys real
+  # features back in dim rooms at a small cost.
+  use_clahe: true
+  # A room pan is supposed to come back to where it started. Letting the pipeline
+  # detect that closure cancels accumulated drift, which is what stops the two
+  # ends of the panorama disagreeing. Set true if the seller only panned part way.
+  disable_circular_closure: false
+  rotation_smoothing_window: 17
+
+intrinsics:
+  # THE most important knob. Phone VIDEO is cropped relative to the same phone's
+  # stills, so the still-photo value upstream ships (42) is far too narrow and
+  # produces a panorama that wraps past 360 deg. ~64 deg matches the main rear
+  # camera of most recent iPhone and Pixel models in 1080p/4K video mode.
+  # If the panorama repeats itself, lower this. If it does not close, raise it.
+  hfov_deg: 64
+  calib_json: null
+
+blending:
+  # Upstream defaults to `none`, which leaves visible steps wherever the phone's
+  # auto-exposure shifted mid-pan -- and it always does, panning past a window.
+  method: multiband
+  multiband_levels: 5
+  multiband_sigma: 3.0
+  feather_sigma: 0.0
+  sharp_blend_width: 1.0
+
+debug:
+  enabled: false
+  save_matches: false
+  save_warped_frames: 0
+  save_seams: false
+  verbose_logging: true

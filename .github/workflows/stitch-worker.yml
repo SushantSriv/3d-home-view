@@ -1,0 +1,58 @@
+name: Stitch worker
+
+# Runs the same worker/worker.py you run locally, on GitHub's free runners, so
+# uploaded videos get stitched even when your machine is off.
+#
+# Requires two repository secrets (Settings -> Secrets and variables -> Actions):
+#   SUPABASE_URL          https://ikuovilpewamyareelqm.supabase.co
+#   SUPABASE_SERVICE_KEY  the service_role key - NEVER commit this
+#
+# Actions minutes are unlimited on public repositories. Two caveats worth knowing:
+# scheduled runs on a busy platform can be delayed by several minutes, and GitHub
+# disables schedules after 60 days with no repository activity.
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+    inputs:
+      max_jobs:
+        description: 'Maximum videos to stitch in this run'
+        required: false
+        default: '5'
+
+permissions:
+  contents: read
+
+# A queued run must not start while another is mid-stitch; claim_next_job() would
+# cope, but there is no point burning a runner on an empty queue.
+concurrency:
+  group: stitch-worker
+  cancel-in-progress: false
+
+jobs:
+  stitch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            worker/requirements.txt
+            stitcher/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r worker/requirements.txt
+
+      - name: Stitch queued videos
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          WORKER_MAX_JOBS: ${{ github.event.inputs.max_jobs || '5' }}
+        run: python worker/worker.py --once

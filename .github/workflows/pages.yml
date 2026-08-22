@@ -1,0 +1,67 @@
+name: Deploy site
+
+# Publishes web/ to GitHub Pages. There is no build step - the directory is
+# uploaded as-is - so what you serve locally with `npx serve web` is byte for byte
+# what visitors get.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'web/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never let two deploys race; let a newer push supersede an in-flight one.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+env:
+  # The studio has no login (risk R1 in PROGRESS.md): anyone who finds its URL can
+  # create or delete tours. Set this to 'false' to publish only the read-only
+  # viewer and keep the studio on your machine, reachable via `npx serve web`.
+  DEPLOY_STUDIO: 'true'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assemble the site
+        run: |
+          cp -r web _site
+          if [ "${DEPLOY_STUDIO}" != "true" ]; then
+            echo "DEPLOY_STUDIO=false -- omitting the studio from the public site"
+            rm -f _site/studio.html _site/js/studio.js
+          fi
+          # Belt and braces: Pages must never try to run Jekyll over this.
+          touch _site/.nojekyll
+          ls -la _site
+
+      - name: Guard against a leaked service key
+        run: |
+          # The anon key is meant to be public. The service_role key is not, and it
+          # would be catastrophic here, so fail the deploy rather than publish it.
+          if grep -rE '"role"\s*:\s*"service_role"|service_role' _site 2>/dev/null; then
+            echo "::error::A service_role key appears in web/. Remove it before deploying."
+            exit 1
+          fi
+          echo "No service key found in the site."
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - id: deployment
+        uses: actions/deploy-pages@v4

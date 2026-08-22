@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>360&deg; Home Tour</title>
+  <meta name="description" content="Record one video per room, get one shareable 360 degree tour link.">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+
+  <header class="topbar">
+    <a class="brand" href="index.html">360<b>&deg;</b> Home Tour</a>
+    <nav>
+      <a class="btn sm" href="tour.html?demo=1">Demo</a>
+      <a class="btn sm primary" href="studio.html">Studio</a>
+    </nav>
+  </header>
+
+  <main class="wrap">
+
+    <h1>One video per room. One link for the buyer.</h1>
+    <p class="muted" style="max-width:62ch;font-size:.95rem">
+      Record a slow pan of each room on your phone, upload the clips with a floor plan, and mark
+      where each room sits. Every clip is stitched into a 360&deg; panorama and the rooms are linked
+      into a single tour behind one address you can paste into a listing. Buyers need no login and
+      no app.
+    </p>
+
+    <p style="margin:1.4rem 0 2rem">
+      <a class="btn primary" href="tour.html?demo=1">Open the demo tour</a>
+      <a class="btn" href="studio.html">Build a tour</a>
+    </p>
+
+    <div class="card">
+      <h2>Published tours</h2>
+      <div id="tours"><p class="muted">Loading&hellip;</p></div>
+    </div>
+
+    <div class="card">
+      <h2>How it works</h2>
+      <ol class="muted" style="padding-left:1.2rem;margin:0">
+        <li><strong>Record</strong> &mdash; one slow, steady 360&deg; pan per room, about 20&ndash;30 seconds. Overlap matters more than speed.</li>
+        <li><strong>Upload</strong> &mdash; drop in the clips plus a floor plan image.</li>
+        <li><strong>Pin</strong> &mdash; click the floor plan where each room is, name it, add the size in m&sup2; if you know it.</li>
+        <li><strong>Stitch</strong> &mdash; each clip becomes an equirectangular panorama. This runs offline, not in your browser.</li>
+        <li><strong>Share</strong> &mdash; publish, copy the link, paste it into the listing.</li>
+      </ol>
+    </div>
+
+    <p class="muted" style="font-size:.8rem">
+      Built on <a href="https://pannellum.org">Pannellum</a> and
+      <a href="https://github.com/Kronbii/360-spherical-stitching">Kronbii/360-spherical-stitching</a>,
+      both MIT licensed. Not a continuous 3D scan &mdash; a set of linked 360&deg; panoramas, one per room.
+    </p>
+
+  </main>
+
+  <script type="module" src="js/index.js"></script>
+</body>
+</html>

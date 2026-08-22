@@ -1,0 +1,14 @@
+# Normalise to LF in the repository. Windows checkouts still get CRLF where it
+# matters, but CI runs these files on Linux, where a stray CR breaks bash.
+* text=auto eol=lf
+
+*.ps1  text eol=crlf
+*.cmd  text eol=crlf
+*.bat  text eol=crlf
+
+*.jpg  binary
+*.jpeg binary
+*.png  binary
+*.webp binary
+*.mp4  binary
+*.mov  binary

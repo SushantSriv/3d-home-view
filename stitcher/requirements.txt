@@ -1,0 +1,14 @@
+# Stitching pipeline dependencies.
+#
+# Mirrors third_party/360-spherical-stitching/requirements.txt with two changes:
+#   * opencv-python-headless instead of opencv-python -- we never open a GUI
+#     window, and the headless wheel avoids pulling GTK/Qt onto CI runners.
+#   * PyYAML added -- our wrapper renders the config template itself.
+# Upstream targets Python 3.12.
+
+opencv-python-headless>=4.8.0
+numpy>=1.24.0
+Pillow>=10.0.0
+exifread>=3.0.0
+natsort>=8.4.0
+PyYAML>=6.0

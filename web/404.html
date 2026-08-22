@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Not found &mdash; 360&deg; Home Tour</title>
+  <script>
+    /*
+     * GitHub Pages has no server-side rewrites, so a pretty share link like
+     *   /3d-home-view/tour/abc1234
+     * lands on this page. Translate it into the real URL and get out of the way,
+     * before first paint, so the visitor never sees this page flash.
+     *
+     * Styles are inlined and links are computed rather than linked relatively:
+     * 404.html is served for ANY unknown depth, so relative paths cannot be trusted.
+     */
+    (function () {
+      var m = location.pathname.match(/^(.*?)\/tour\/([^/?#]+)\/?$/);
+      if (m) {
+        location.replace((m[1] || '') + '/tour.html?t=' + encodeURIComponent(m[2]) + location.hash);
+      }
+    })();
+  </script>
+  <style>
+    :root { color-scheme: dark light; }
+    body {
+      margin: 0; min-height: 100vh; display: grid; place-items: center;
+      background: #0f1115; color: #e7e9ee; text-align: center; padding: 2rem;
+      font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    @media (prefers-color-scheme: light) { body { background: #f6f7f9; color: #171a21; } }
+    h1 { font-size: 1.6rem; letter-spacing: -.02em; margin: 0 0 .4rem; }
+    p { color: #9aa3b2; margin: 0 0 1.4rem; }
+    a {
+      display: inline-block; margin: 0 .2rem; padding: .5rem .85rem;
+      border: 1px solid #4f9cf9; border-radius: 8px;
+      color: #4f9cf9; text-decoration: none; font-size: .9rem;
+    }
+    a.primary { background: #4f9cf9; color: #06264f; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Page not found</h1>
+    <p>That address does not exist on this site.</p>
+    <p id="links"></p>
+  </main>
+  <script>
+    // Derive the site root from this page's own location so the links work whether
+    // the site is at example.github.io/repo/ or at a custom domain root.
+    (function () {
+      var parts = location.pathname.split('/');
+      var root = location.hostname.endsWith('.github.io') && parts[1] ? '/' + parts[1] : '';
+      document.getElementById('links').innerHTML =
+        '<a class="primary" href="' + root + '/">Home</a>' +
+        '<a href="' + root + '/tour.html?demo=1">Demo tour</a>';
+    })();
+  </script>
+</body>
+</html>

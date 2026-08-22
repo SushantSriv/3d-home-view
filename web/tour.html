@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>360&deg; Home Tour</title>
+  <meta name="description" content="Walk through this property in 360 degrees. No login, no app.">
+  <meta property="og:title" content="360&deg; Home Tour">
+  <meta property="og:description" content="Walk through this property in 360 degrees.">
+  <meta property="og:type" content="website">
+  <link rel="stylesheet" href="vendor/pannellum/pannellum.css">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body class="viewer">
+
+  <div id="pano"></div>
+
+  <div id="tag" class="tour-tag hidden"></div>
+
+  <div id="actions" class="tour-actions hidden">
+    <button id="next" class="btn sm" title="Next room (N)">Next room</button>
+    <button id="copy" class="btn sm">Copy link</button>
+  </div>
+
+  <details id="dock" class="tour-dock hidden" open>
+    <summary><span class="label">Floor plan</span></summary>
+    <div class="body">
+      <div id="plan" class="floorplan"></div>
+      <p class="muted" style="color:#c8ccd4;font-size:.72rem;margin:.4rem .1rem 0">
+        Tap a numbered pin to enter that room.
+      </p>
+    </div>
+  </details>
+
+  <div id="msg" class="tour-msg hidden">
+    <div id="msg-inner" class="inner"></div>
+  </div>
+
+  <script src="vendor/pannellum/pannellum.js"></script>
+  <script type="module" src="js/tour.js"></script>
+</body>
+</html>

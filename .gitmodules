@@ -1,0 +1,3 @@
+[submodule "third_party/360-spherical-stitching"]
+	path = third_party/360-spherical-stitching
+	url = https://github.com/Kronbii/360-spherical-stitching
