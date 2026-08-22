@@ -234,7 +234,13 @@ body.viewer { height: 100dvh; overflow: hidden; }
 .tour-dock[open] summary::after { content: "\25B4"; }
 .tour-dock .body { padding: 0 .6rem .6rem; }
 .tour-dock .floorplan { background: rgba(255, 255, 255, .06); border-color: rgba(255, 255, 255, .15); }
-@media (max-width: 560px) { .tour-dock { width: calc(100vw - 2rem); } }
+/* On a phone the plan is the navigation, but at full width it measured 358x543
+   inside a 390x844 screen - 64% of the tour covered by a map of it. Give it the
+   width it needs and a ceiling on the height. */
+@media (max-width: 560px), (max-height: 520px) {
+  .tour-dock { width: calc(100vw - 2rem); max-height: 70vh; }
+  .tour-dock .body { max-height: calc(70vh - 2.4rem); overflow: auto; }
+}
 
 .tour-actions { position: fixed; top: 1rem; right: 1rem; z-index: 20; display: flex; gap: .4rem; }
 .tour-actions .btn {

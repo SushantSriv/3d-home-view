@@ -290,6 +290,57 @@ a true overlap, and were pulled together into 194°, losing the gap. A single
 correlation score cannot separate a true match from a plausible one, so the studio
 now says when the evidence was thin rather than deciding silently.
 
+### Zoom limits cannot be constants
+
+Reported as "infinite zoom in or out ... the scale does not look good". The viewer
+had a fixed `hfov: 100` opening view with `minHfov: 50` / `maxHfov: 120`, and those
+numbers only work for one viewport shape:
+
+| viewport | vertical view at hfov 100 | at hfov 50 (max zoom in) | image is 68° |
+|---|---|---|---|
+| desktop 16:9 | 67.7° | 29.4° | fits |
+| laptop 1440×780 | 65.7° | 28.4° | fits |
+| **phone portrait** | **137.6°** | **90.5°** | **never fits** |
+
+On a phone held upright the panorama cannot fill the frame at *any* allowed zoom —
+the closest reachable is 90.5° against a 68° image. Zooming therefore never
+resolves, which is exactly what "zooming forever and it never sits right" is. And
+whenever the view is taller than the image, Pannellum pins pitch to the centre
+(`maxPitch - minPitch < a → f = n = (f+n)/2`), so dragging up and down stops
+responding too. Desktop 16:9 sat at 67.7 against 68 — passing by a third of a
+degree, which is why it looked fine and hid the problem.
+
+The fix derives the zoom-out limit from the panorama and the viewport instead:
+`fitHfov(vaov, aspect) = 2·atan(tan(vaov/2)·aspect)`, which is the hfov at which the
+band exactly fills the height. That becomes `maxHfov` and the opening `hfov`, with
+`minHfov` at half of it so there is always a factor of two of zoom in hand — a
+fixed floor of 50 would have pinned zoom entirely on a tall screen, where the whole
+usable range sits below it. `avoidShowingBackground: true` makes Pannellum
+re-derive the same bound every frame from the live canvas, so a resized window or a
+rotated phone stays right.
+
+Measured by screenshotting the real published tour before and after, and counting
+backdrop-coloured pixels:
+
+| viewport | before | after |
+|---|---|---|
+| 1600×900 | 0.1 % | 0.1 % |
+| 900×1000 | *rendered pure black* | 0.1 % |
+| **390×844** | **24.5 %** | **0.0 %** |
+
+An earlier attempt at this measurement read the WebGL canvas with `drawImage` and
+reported 0 % for every case including the broken ones. Pannellum does not set
+`preserveDrawingBuffer`, so the buffer is empty by the time it can be read; the
+numbers above come from real screenshots instead.
+
+### The floor plan was covering the tour on a phone
+
+Found while checking the above, not reported. The dock measured 358 × 543 inside a
+390 × 844 screen — 64 % of the tour covered by a map of it, on the device the share
+link is most likely to be opened on. It now folds shut on a small screen on the way
+in (once only, so it does not undo the visitor's own choice) and has a height
+ceiling when open.
+
 ### Reproducing
 
 ```powershell
@@ -301,6 +352,11 @@ now says when the evidence was thin rather than deciding silently.
 
 ## 7. Changelog
 
+- **2026-08-22 (viewer)** — Fixed zoom that never resolved on a tall viewport: the limits
+  were constants that only suited 16:9, and on a phone in portrait the image could not fill
+  the frame at any allowed zoom. They now come from the panorama's own `vaov` and the live
+  viewport shape. Also folded the floor-plan dock away on small screens, where it had been
+  covering two thirds of the tour.
 - **2026-08-22 (HEIC, part two)** — The first real HEIC upload failed on an opaque
   WebIDL type error. Cause was memory: three copies of a 40 MP image live at once, which
   kills the renderer rather than throwing. Now goes straight from libheif's pixels to a

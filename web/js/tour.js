@@ -192,9 +192,22 @@ function renderTag(room) {
   els.tag.classList.remove('hidden');
 }
 
+let dockDefaulted = false;
+
 function renderDock() {
   if (!tour.floor_plan_url) return els.dock.classList.add('hidden');
   els.dock.classList.remove('hidden');
+
+  // Fold the plan away on a small screen, once, on the way in. Expanded it takes
+  // roughly two thirds of a phone, which puts a map of the flat on top of the
+  // flat. Only the first render decides - re-folding it every time someone walks
+  // into another room would undo their own choice.
+  if (!dockDefaulted) {
+    dockDefaulted = true;
+    if (window.matchMedia('(max-width: 560px), (max-height: 520px)').matches) {
+      els.dock.open = false;
+    }
+  }
   els.dock.querySelector('.label').textContent = tour.name;
   renderFloorPlan(els.plan, {
     imageUrl: tour.floor_plan_url,
@@ -212,8 +225,30 @@ function renderDock() {
 
 /* ---------------------------------------------------------------- viewer */
 
+/**
+ * The hfov at which a band `vaovDeg` tall exactly fills a viewport of this shape.
+ *
+ * Zoom limits cannot be constants, because how much of the screen a panorama
+ * covers depends entirely on the viewport's shape. A phone sweep is a band about
+ * 68 degrees tall. On a 16:9 desktop window an hfov of 100 works out at a 67.7
+ * degree vertical view, which fits almost exactly - so a fixed 100 looked fine
+ * and hid the problem. Turn a phone upright and that same 100 becomes 137.6, and
+ * even zoomed fully in at hfov 50 it is still 90.5 against a 68 degree image. The
+ * picture can never fill the frame however far you zoom, which is what zooming in
+ * and out forever and never getting it to sit right actually is.
+ */
+function fitHfov(vaovDeg, aspect) {
+  return (2 * Math.atan(Math.tan((vaovDeg * Math.PI) / 360) * aspect) * 180) / Math.PI;
+}
+
 function mountViewer(panoramaUrl, extra = {}) {
   viewer?.destroy();
+
+  // Treat missing geometry as a full sphere - showSinglePanorama passes none.
+  const haov = Number.isFinite(extra.haov) ? extra.haov : 360;
+  const vaov = Number.isFinite(extra.vaov) ? extra.vaov : 180;
+  const vOffset = Number.isFinite(extra.vOffset) ? extra.vOffset : 0;
+
   const config = {
     type: 'equirectangular',
     panorama: panoramaUrl,
@@ -228,29 +263,52 @@ function mountViewer(panoramaUrl, extra = {}) {
     backgroundColor: [0.07, 0.07, 0.09],
     ...extra,
   };
+
   // Pannellum only accepts these together and rejects a full sphere declared
   // partially, so drop them when the image really is 360x180.
-  if (config.haov >= 359.9 && config.vaov >= 179.9) {
+  if (haov >= 359.9 && vaov >= 179.9) {
     delete config.haov;
     delete config.vaov;
     delete config.vOffset;
   } else {
+    config.haov = haov;
+    config.vaov = vaov;
+    config.vOffset = vOffset;
+
     // Fence the view to what the panorama actually covers. A phone sweep that
-    // stopped at 240 degrees leaves a third of the room missing, and letting
-    // someone drag into that void is worse than simply not letting them: the
-    // view now comes to a stop at the edge of the real image.
-    if (config.haov < 359.9) {
-      config.minYaw = -config.haov / 2;
-      config.maxYaw = config.haov / 2;
+    // stopped at 229 degrees leaves a third of the room missing, and letting
+    // someone drag into that void is worse than simply not letting them.
+    if (haov < 359.9) {
+      config.minYaw = -haov / 2;
+      config.maxYaw = haov / 2;
       config.yaw = 0;
     }
-    if (config.vaov < 179.9) {
-      config.minPitch = config.vOffset - config.vaov / 2;
-      config.maxPitch = config.vOffset + config.vaov / 2;
+    if (vaov < 179.9) {
+      config.minPitch = vOffset - vaov / 2;
+      config.maxPitch = vOffset + vaov / 2;
+      config.pitch = vOffset;
     }
-    // Do not let the zoom pull back further than the image can fill.
-    config.maxHfov = Math.min(config.maxHfov, Math.max(60, config.haov * 0.9));
+
+    // Zoom out no further than the point where the image still fills the frame,
+    // and open at exactly that point so the first thing anyone sees is the
+    // picture rather than the picture floating in a field of grey.
+    const box = els.pano.getBoundingClientRect();
+    const aspect = box.width > 0 && box.height > 0 ? box.width / box.height : 16 / 9;
+    const fit = Math.min(vaov < 179.9 ? fitHfov(vaov, aspect) : 360, haov);
+
+    config.maxHfov = Math.min(config.maxHfov, fit);
+    // Leave a factor of two of zoom in hand. Deriving this from maxHfov rather
+    // than keeping a fixed 50 matters on a tall viewport, where the whole usable
+    // range can sit below 50 and a fixed floor would pin zooming altogether.
+    config.minHfov = Math.min(config.minHfov, config.maxHfov / 2);
+    config.hfov = Math.min(config.hfov, config.maxHfov);
+
+    // Pannellum re-derives this every frame from the live canvas, so a resized
+    // window or a rotated phone keeps the band filling the frame - which a value
+    // computed once here cannot do.
+    config.avoidShowingBackground = true;
   }
+
   // Only meaningful for remote images; setting it on a data: URL is pointless noise.
   if (/^https?:/i.test(panoramaUrl)) config.crossOrigin = 'anonymous';
 
