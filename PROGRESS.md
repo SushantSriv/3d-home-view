@@ -409,6 +409,68 @@ the main open question — if it shows, the fix is to refine each frame's yaw ag
 the image using the correlation machinery that is already there, with the sensor
 reading as the starting point rather than the answer.
 
+### Why the first capture attempt came out a mess of overlaps
+
+Reported as *"still doesn't work, it has a lot of overlapped structures, nothing is
+very much clear"*. Three separate faults, one of which dominates.
+
+**1. The assumed field of view was for the wrong axis.** `FALLBACK_HFOV = 65` is
+about right for a phone's *long* image axis — but this app asks for the phone to be
+held **upright**, where the long axis is vertical. A portrait 16:9 frame is only
+about **40.8°** across. Every frame was therefore painted **1.56× wider than it
+really was**, so consecutive frames overlapped far more than intended and the same
+furniture landed several times at several scales. Reproduced against ground truth:
+the old assumption scores **correlation 0.6315, mean abs error 35.7/255**.
+
+The fallback is now stated for the long axis (`FALLBACK_LONG_FOV = 67`) and the
+horizontal figure is derived from the frame's own shape, which works for portrait,
+landscape, 16:9 and 4:3 alike. The estimator's plausibility window also had to open
+down to 20° — it rejected 30° and below, which would have thrown away every correct
+measurement of a portrait frame.
+
+**2. Two orientation sources at once.** Both `deviceorientation` and
+`deviceorientationabsolute` were bound. Chrome fires both, with alpha measured from
+different references, so yaw jumped between two frames of reference on alternate
+events. Now the first event type seen wins and the other is ignored — verified by
+firing competing absolute events offset by 137° and confirming coverage still
+reaches exactly 100%.
+
+**3. `webkitCompassHeading` was preferred over alpha.** That is the heading of the
+*top of the device*, which for an upright phone points at the sky and is degenerate
+— precisely the attitude being asked for. Only relative yaw is needed here, so the
+gyro-derived alpha is both sufficient and smooth. Dropped.
+
+**Also added, because the sensor is not the whole story.** The gyroscope says where
+the phone was pointing; it does not say where the *picture* was taken. Those differ
+by however long the camera pipeline held the frame — a tenth of a second at 30°/s is
+3° — and by accumulated drift. Both show up as structures repeating slightly offset
+from themselves. Each patch is now correlated against the overlap it should have
+with the panorama so far and nudged into place, bounded to ±6° and only when the
+peak is convincing; a blank wall leaves the sensor reading alone.
+
+**Frame orientation is now measured, not assumed.** A phone held upright commonly
+delivers frames in the sensor's landscape orientation; the `<video>` element hides
+it but `drawImage` does not. Since the sensors already establish that the phone is
+upright, only two candidates exist — turn a quarter or don't — so the question
+reduces to a sign: turning right slides the picture left, so a correctly oriented
+frame has shift and Δyaw of opposite signs. An earlier version tried to determine
+the *axis* too, by asking which moved more; that failed, because a row profile down
+a wall is a smooth ramp and a smooth ramp correlates well against itself at almost
+any offset, so the argmax landed anywhere.
+
+Measured against the real panorama, frames synthesised at known angles:
+
+| condition | correlation | mean abs error |
+|---|---|---|
+| the old 65° assumption | 0.6315 | 35.7 |
+| upright frames, no drift | **0.9858** | 5.0 |
+| sensor delivers landscape (+90) | **0.9858** | 5.0 |
+| sensor delivers landscape (−90) | **0.9858** | 5.0 |
+| landscape plus 0.5°/frame drift | **0.9404** | 10.0 |
+
+Rotation was identified correctly in every case at score 0.99, and the horizontal
+field of view recovered as 40.8° against a true 40.8°.
+
 ### Reproducing
 
 ```powershell
@@ -420,6 +482,12 @@ reading as the starting point rather than the answer.
 
 ## 7. Changelog
 
+- **2026-08-22 (capture, corrected)** — First real capture came out badly overlapped. Chief
+  cause: the assumed 65° field of view is a *long-axis* figure, and a portrait phone frame is
+  only ~41° across, so every frame was drawn 1.56× too wide. Also bound two orientation event
+  sources with different references, and preferred a compass heading that is degenerate for an
+  upright phone. Frame orientation and lens width are now both measured, and each frame is
+  nudged into place against the overlap to absorb drift and camera latency.
 - **2026-08-22 (guided capture)** — Added `Capture 360°`: the app drives the camera and
   reads the phone's motion sensors, so frame placement is arithmetic instead of inference,
   and the sweep continues until coverage is actually complete rather than stopping where

@@ -149,6 +149,84 @@ export function createPanoBuilder({ degPerPx = DEFAULT_DEG_PER_PX, vaovDeg = 120
   const columns = new Uint8Array(width);
   let frames = 0;
 
+  /**
+   * Mean luminance per column of a canvas region, ignoring anything not solidly
+   * covered. Half-transparent pixels are the feathered edges of earlier frames
+   * and would drag the profile towards the background.
+   */
+  function profileOf(source, x0, w, y0, h) {
+    const c = document.createElement('canvas');
+    c.width = w;
+    c.height = h;
+    const cx = c.getContext('2d');
+    // Draw three times so a window straddling the 0/360 seam still fills.
+    for (const dx of [-width, 0, width]) cx.drawImage(source, -x0 + dx, -y0);
+    const d = cx.getImageData(0, 0, w, h).data;
+    const gray = new Float32Array(w);
+    const filled = new Uint8Array(w);
+    for (let x = 0; x < w; x++) {
+      let sum = 0;
+      let seen = 0;
+      for (let y = 0; y < h; y++) {
+        const i = (y * w + x) * 4;
+        if (d[i + 3] < 200) continue;
+        sum += 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+        seen++;
+      }
+      gray[x] = seen ? sum / seen : 0;
+      filled[x] = seen > h * 0.4 ? 1 : 0;
+    }
+    return { gray, filled };
+  }
+
+  /**
+   * Nudge a patch into place against what is already on the canvas.
+   *
+   * The gyroscope says where the phone was pointing; it does not say where the
+   * picture was taken. Those differ by however long the camera pipeline held the
+   * frame - a tenth of a second at 30 degrees per second is three degrees - and
+   * by whatever the sensor has drifted since the sweep began. Both are small and
+   * both accumulate, and both show up as structures repeating slightly offset
+   * from themselves.
+   *
+   * So the sensor reading is treated as a starting point rather than an answer:
+   * correlate the incoming patch against the overlap it should have with the
+   * panorama so far, and take the correction if the evidence is good. Bounded,
+   * because a large "correction" against a repetitive wall is a wrong one.
+   */
+  function refine(patch, maxShiftPx) {
+    const y0 = Math.max(0, Math.round(patch.y));
+    const h = Math.min(height - y0, patch.canvas.height);
+    if (h < 8) return 0;
+
+    const cw = patch.canvas.width;
+    const x0 = Math.round(patch.x);
+    const base = profileOf(canvas, x0 - maxShiftPx, cw + 2 * maxShiftPx, y0, h);
+    const mine = profileOf(patch.canvas, 0, cw, 0, h);
+
+    let best = { shift: 0, score: -Infinity };
+    for (let s = 0; s <= 2 * maxShiftPx; s++) {
+      let n = 0;
+      let sa = 0, sb = 0, saa = 0, sbb = 0, sab = 0;
+      for (let x = 0; x < cw; x++) {
+        if (!mine.filled[x] || !base.filled[x + s]) continue;
+        const a = base.gray[x + s];
+        const b = mine.gray[x];
+        n++; sa += a; sb += b; saa += a * a; sbb += b * b; sab += a * b;
+      }
+      if (n < cw * 0.25) continue;
+      const cov = sab / n - (sa / n) * (sb / n);
+      const va = saa / n - (sa / n) ** 2;
+      const vb = sbb / n - (sb / n) ** 2;
+      if (va <= 1e-6 || vb <= 1e-6) continue;
+      const score = cov / Math.sqrt(va * vb);
+      if (score > best.score) best = { shift: s - maxShiftPx, score };
+    }
+    // A weak peak means the overlap is a blank wall; the sensor is the better
+    // guess there, so leave it alone.
+    return best.score > 0.55 ? best.shift : 0;
+  }
+
   function paint(patch) {
     // Wrap across the 0/360 seam by drawing the patch up to three times; the
     // off-canvas copies cost nothing and remove every special case.
@@ -165,15 +243,27 @@ export function createPanoBuilder({ degPerPx = DEFAULT_DEG_PER_PX, vaovDeg = 120
     canvas,
     degPerPx,
 
-    /** yaw and pitch in degrees, focal in source pixels. */
-    addFrame(source, { yaw, pitch = 0, focal }) {
+    /**
+     * yaw and pitch in degrees, focal in source pixels. Returns the yaw the frame
+     * was actually placed at, which is the sensor reading plus any correction the
+     * overlap justified.
+     */
+    addFrame(source, { yaw, pitch = 0, focal, refineDeg = 0 }) {
       const patch = projectFrame(source, {
         yaw, pitch, focal, degPerPx, canvasWidth: width, canvasHeight: height,
       });
-      if (!patch) return false;
+      if (!patch) return null;
+
+      let correction = 0;
+      if (refineDeg > 0 && frames > 0) {
+        const shift = refine(patch, Math.max(1, Math.round(refineDeg / degPerPx)));
+        patch.x += shift;
+        correction = shift * degPerPx;
+      }
+
       paint(patch);
       frames++;
-      return true;
+      return { yaw: yaw + correction, correction };
     },
 
     frameCount: () => frames,
@@ -326,11 +416,62 @@ export function columnProfile(source, bandFraction = 0.4) {
 }
 
 /**
+ * Which way up does the camera hand us its pixels?
+ *
+ * This cannot be assumed. A phone held upright in portrait very often delivers
+ * frames in the sensor's own landscape orientation - the <video> element hides it,
+ * but drawImage does not - and treating a sideways frame as upright puts the yaw
+ * axis on the wrong image axis. Every frame then gets placed at the wrong angular
+ * width, which is what a mess of overlapping structures looks like.
+ *
+ * Only two candidates ever need considering, because the caller has already
+ * established from the sensors that the phone is being held upright: a landscape
+ * frame must be turned a quarter, a portrait one must not. That leaves a single
+ * question - which of the two ways round - and it is answered by a sign rather
+ * than a magnitude: turning right slides the picture left, so in a correctly
+ * oriented frame the shift opposes the change in yaw.
+ *
+ * An earlier version tried to work out the axis too, by asking which of the two
+ * moved more. That does not survive contact with a room: a row profile down a
+ * wall is a smooth ramp, and a smooth ramp correlates well against itself at
+ * almost any offset, so the argmax lands anywhere and the wrong axis wins.
+ */
+export function detectRotation(prev, cur, deltaYawDeg) {
+  if (Math.abs(deltaYawDeg) < 1.5) return null;
+
+  const candidates = prev.width > prev.height ? [90, 270] : [0, 180];
+  const a = rotateFrame(prev, candidates[0]);
+  const b = rotateFrame(cur, candidates[0]);
+  const { shift, score } = shiftBetween(
+    columnProfile(a), columnProfile(b), Math.round(a.width * 0.45)
+  );
+  if (score < 0.5 || Math.abs(shift) < 4) return null;
+
+  const opposed = Math.sign(shift) !== Math.sign(deltaYawDeg);
+  return { degrees: opposed ? candidates[0] : candidates[1], score };
+}
+
+/** Rotate a frame by a multiple of 90 degrees. */
+export function rotateFrame(source, degrees) {
+  const d = ((degrees % 360) + 360) % 360;
+  if (d === 0) return source;
+  const swap = d === 90 || d === 270;
+  const c = document.createElement('canvas');
+  c.width = swap ? source.height : source.width;
+  c.height = swap ? source.width : source.height;
+  const ctx = c.getContext('2d');
+  ctx.translate(c.width / 2, c.height / 2);
+  ctx.rotate((d * Math.PI) / 180);
+  ctx.drawImage(source, -source.width / 2, -source.height / 2);
+  return c;
+}
+
+/**
  * Accumulates focal-length evidence across a sweep and returns the running
  * median, which shrugs off the occasional frame where the correlation locked on
  * to a repeating skirting board.
  */
-export function createFocalEstimator({ fallbackHfov = 65 } = {}) {
+export function createFocalEstimator({ fallbackFocal } = {}) {
   const samples = [];
   return {
     /** Both profiles from columnProfile(), deltaYaw in degrees. */
@@ -357,14 +498,16 @@ export function createFocalEstimator({ fallbackHfov = 65 } = {}) {
       if (thetaC > 1e-4) focal /= Math.tan(thetaC) / thetaC;
 
       const hfov = hfovFromFocal(focal, widthPx);
-      if (hfov < 30 || hfov > 100) return null; // not a phone camera; discard
+      // A portrait 16:9 phone frame is only about 41 degrees across, so the
+      // window has to reach well below the 30 an earlier version used.
+      if (hfov < 20 || hfov > 110) return null; // not a phone camera; discard
       samples.push(focal);
       return focal;
     },
     count: () => samples.length,
     /** Median of what we have, or the fallback until there is enough. */
-    focal(widthPx) {
-      if (samples.length < 3) return focalFromHfov(fallbackHfov, widthPx);
+    focal() {
+      if (samples.length < 3) return fallbackFocal;
       const s = [...samples].sort((a, b) => a - b);
       return s[s.length >> 1];
     },

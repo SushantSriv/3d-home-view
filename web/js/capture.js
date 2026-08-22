@@ -25,16 +25,32 @@ import {
   createPanoBuilder,
   createFocalEstimator,
   columnProfile,
-  focalFromHfov,
   hfovFromFocal,
   angleDelta,
+  detectRotation,
+  rotateFrame,
 } from './sphere.js';
 
 const RAD = Math.PI / 180;
 const DEG = 180 / Math.PI;
 
-/** Assumed until the sweep has measured the real one. */
-const FALLBACK_HFOV = 65;
+/**
+ * Field of view across the LONGER image axis, assumed until the sweep measures
+ * the real one. Phone main cameras cluster tightly around this.
+ *
+ * It has to be stated for the long axis, because that is the figure that stays
+ * put. An earlier version assumed 65 degrees HORIZONTALLY, which is right for a
+ * landscape frame and badly wrong for the portrait one this app asks for: a
+ * portrait 16:9 frame is only about 41 degrees across. Every frame was therefore
+ * painted 1.56x wider than it really was, so consecutive frames overlapped far
+ * more than intended and the same furniture landed several times over. That is
+ * what the smeared, doubled-up result was.
+ */
+const FALLBACK_LONG_FOV = 67;
+
+/** Focal length in pixels implied by FALLBACK_LONG_FOV for a frame this size. */
+const fallbackFocalFor = (w, h) =>
+  Math.max(w, h) / 2 / Math.tan((FALLBACK_LONG_FOV * RAD) / 2);
 /** Reject frames tilted more than this - they would smear the horizon. */
 const MAX_ROLL = 14;
 /** Buffer frames until the focal estimate settles, then composite them properly. */
@@ -161,12 +177,20 @@ export function captureRoom({ label = 'this room' } = {}) {
     let finished = false;
 
     const orient = { yaw: 0, pitch: 0, roll: 0, seen: false };
+    // Only ever one source. Chrome fires both deviceorientation and
+    // deviceorientationabsolute, with alpha measured from different references,
+    // so listening to both made yaw jump between two frames of reference on
+    // alternate events and scattered the frames around the circle.
+    let bound = null;
     const onOrient = (ev) => {
-      // iOS reports a true compass heading separately; when it is there, alpha is
-      // the less trustworthy of the two.
-      const alpha = ev.webkitCompassHeading != null ? 360 - ev.webkitCompassHeading : ev.alpha;
-      if (alpha == null || ev.beta == null || ev.gamma == null) return;
-      Object.assign(orient, cameraFromOrientation(alpha, ev.beta, ev.gamma));
+      if (bound && ev.type !== bound) return;
+      // NOT webkitCompassHeading. That is the heading of the TOP of the device,
+      // and this app asks for the phone to be held upright - where the top points
+      // at the sky and the heading is degenerate. Only relative yaw is needed
+      // here, and alpha is gyro-derived and smooth.
+      if (ev.alpha == null || ev.beta == null || ev.gamma == null) return;
+      if (!bound) bound = ev.type;
+      Object.assign(orient, cameraFromOrientation(ev.alpha, ev.beta, ev.gamma));
       orient.seen = true;
     };
 
@@ -190,9 +214,13 @@ export function captureRoom({ label = 'this room' } = {}) {
     /* ------------------------------------------------------------- capturing */
 
     const builder = createPanoBuilder();
-    const estimator = createFocalEstimator({ fallbackHfov: FALLBACK_HFOV });
+    let estimator = null; // needs the frame size, so built once the camera is up.
     const pending = []; // held back until the focal length is known
     let focal = null;
+    // How the sensor's pixels sit relative to the phone. Measured, never assumed:
+    // a phone held upright commonly hands over landscape frames.
+    let rotation = null;
+    let lastRaw = null;
     let yaw0 = null;
     let lastYaw = null;
     let lastProfile = null;
@@ -213,8 +241,13 @@ export function captureRoom({ label = 'this room' } = {}) {
     }
 
     function commit(frame, yaw, pitch) {
-      builder.addFrame(frame, { yaw, pitch, focal });
+      // Refine against the overlap: the gyroscope says where the phone pointed,
+      // not where the picture was taken, and the two drift apart.
+      builder.addFrame(rotateFrame(frame, rotation || 0), { yaw, pitch, focal, refineDeg: 6 });
     }
+
+    /** Width of a frame once it is the right way up. */
+    const uprightWidth = () => ((rotation === 90 || rotation === 270) ? grabH : grabW);
 
     function paintCoverage() {
       const secs = builder.sectors(SECTORS);
@@ -252,28 +285,49 @@ export function captureRoom({ label = 'this room' } = {}) {
         return;
       }
 
-      const hfov = focal ? hfovFromFocal(focal, grabW) : FALLBACK_HFOV;
+      const known = focal ?? fallbackFocalFor(grabW, grabH);
+      const hfov = hfovFromFocal(known, uprightWidth());
       const step = hfov * 0.5;
       const moved = lastYaw == null ? Infinity : Math.abs(angleDelta(yaw, lastYaw));
 
       if (moved >= step) {
-        const frame = snapshot();
-        const profile = columnProfile(frame);
+        const raw = snapshot();
+        const moveBy = lastYaw == null ? 0 : angleDelta(yaw, lastYaw);
 
-        if (focal == null) {
-          if (lastProfile) estimator.observe(lastProfile, profile, angleDelta(yaw, lastYaw), grabW);
-          pending.push({ frame, yaw, pitch });
-          if (estimator.settled() || pending.length >= CALIBRATION_FRAMES) {
-            focal = estimator.focal(grabW);
-            for (const f of pending) commit(f.frame, f.yaw, f.pitch);
-            pending.length = 0;
+        // Learn which way up the sensor hands over pixels before trusting any
+        // of them. Until that is settled the frames are only held, not placed.
+        if (rotation == null && lastRaw) {
+          const found = detectRotation(lastRaw, raw, moveBy);
+          if (found) rotation = found.degrees;
+          else if (pending.length >= CALIBRATION_FRAMES) {
+            // Nothing to lock on to - a blank wall. Fall back to the geometry:
+            // the phone is upright (roll was checked above), so a landscape frame
+            // must be turned a quarter.
+            rotation = grabW > grabH ? 90 : 0;
           }
-        } else {
-          if (lastProfile) estimator.observe(lastProfile, profile, angleDelta(yaw, lastYaw), grabW);
-          commit(frame, yaw, pitch);
         }
 
-        lastProfile = profile;
+        if (rotation == null) {
+          pending.push({ frame: raw, yaw, pitch });
+        } else {
+          const upright = rotateFrame(raw, rotation);
+          const profile = columnProfile(upright);
+          if (lastProfile) estimator.observe(lastProfile, profile, moveBy, upright.width);
+          lastProfile = profile;
+
+          if (focal == null) {
+            pending.push({ frame: raw, yaw, pitch });
+            if (estimator.settled() || pending.length >= CALIBRATION_FRAMES) {
+              focal = estimator.focal();
+              for (const f of pending) commit(f.frame, f.yaw, f.pitch);
+              pending.length = 0;
+            }
+          } else {
+            commit(raw, yaw, pitch);
+          }
+        }
+
+        lastRaw = raw;
         lastYaw = yaw;
       }
 
@@ -304,7 +358,8 @@ export function captureRoom({ label = 'this room' } = {}) {
 
       // Anything still waiting on calibration would otherwise be thrown away.
       if (pending.length) {
-        focal = focal ?? estimator.focal(grabW);
+        rotation = rotation ?? (grabW > grabH ? 90 : 0);
+        focal = focal ?? estimator.focal();
         for (const f of pending) commit(f.frame, f.yaw, f.pitch);
         pending.length = 0;
       }
@@ -332,7 +387,8 @@ export function captureRoom({ label = 'this room' } = {}) {
         placements: null,
         width: built.canvas.width,
         height: built.canvas.height,
-        hfov: hfovFromFocal(focal, grabW),
+        hfov: hfovFromFocal(focal, uprightWidth()),
+        rotation,
       });
     };
 
@@ -379,6 +435,7 @@ export function captureRoom({ label = 'this room' } = {}) {
         grabH = Math.round(vh * scale);
         grab.width = grabW;
         grab.height = grabH;
+        estimator = createFocalEstimator({ fallbackFocal: fallbackFocalFor(grabW, grabH) });
 
         // Give the sensors a moment; on some devices the first events lag.
         setTimeout(() => {
