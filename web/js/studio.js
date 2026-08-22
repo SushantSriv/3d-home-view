@@ -264,7 +264,7 @@ function roomCard(room, i) {
       <label>Panorama photo &mdash; best quality, ready in seconds</label>
       <div class="filepick">
         <label class="btn sm primary">
-          <input class="f-photo" type="file" accept="image/*" multiple hidden>
+          <input class="f-photo" type="file" accept="image/*,.heic,.heif" multiple hidden>
           ${room.panorama_url ? 'Replace panorama' : 'Choose panorama'}
         </label>
         <span class="fname muted">Your phone's Panorama mode. Pick two sweeps to cover a whole room.</span>
@@ -438,10 +438,7 @@ async function uploadPanorama(room, input) {
 
   try {
     const { preparePanorama } = await import('./pano.js');
-    note.textContent = files.length > 1
-      ? `Joining ${files.length} sweeps…`
-      : 'Reading panorama…';
-    const pano = await preparePanorama(files);
+    const pano = await preparePanorama(files, { onStage: (text) => (note.textContent = text) });
 
     if (pano.vaov < 25) {
       throw new Error(

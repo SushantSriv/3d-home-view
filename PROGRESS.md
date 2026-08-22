@@ -204,6 +204,42 @@ Verified by round-tripping a known panorama through the exact algorithm: recover
 The viewer honours `haov`/`vaov`/`v_offset`, so a band renders as a band with
 clean empty space above and below rather than being stretched over a full sphere.
 
+### HEIC, which is the default and could not be opened
+
+iPhones write HEIC, Panorama mode included, and no browser except Safari decodes
+it. So the single most likely file a Norwegian seller uploads was the one file the
+app rejected — and it rejected it with a guess, because the old code blamed HEIC
+for *every* decode failure whether or not the file was one.
+
+Both halves are fixed:
+
+- **Sniffing.** `sniff()` reads the first 64 bytes and identifies the container from
+  the magic bytes. Neither the extension nor the browser's MIME type is trustworthy;
+  a HEIC out of a synced iCloud folder often arrives with `type: ""`. It reads the
+  ISO base-media *compatible brands* list, not just the major brand — the sample
+  iPhone-style file is major brand `mif1`, with `heic` further down the list, so
+  checking the major brand alone would have missed it. Unit-tested against real
+  HEIC, JPEG, PNG, MP4 and AVIF bytes: 5/5.
+- **Decoding.** `web/vendor/libheif/` holds libheif built to WebAssembly. It is
+  imported dynamically, and only after the browser's own decoder has already failed,
+  so Safari never downloads it and neither does a JPEG upload. `decode()` picks the
+  largest image in the file, because a HEIC also carries a thumbnail and sometimes a
+  depth map.
+
+Verified end to end in headless Edge — a browser that genuinely cannot decode HEIC —
+against a real HEIC: native decode failed, the sniffer routed to libheif, the wasm
+bundle was fetched, and the result was a 364 KB JPEG with real image content, in
+1.29 s including the 1.2 MB download. Geometry came out as predicted for a 1280×854
+source at 68° vfov: `haov` 115.8° against 115.9° computed by hand.
+
+**Licence note:** libheif is LGPL-3.0, the only non-MIT dependency in the project.
+It is shipped unmodified as a separate runtime-loaded file, which is what keeps the
+obligation contained. See `THIRD_PARTY_LICENSES.md` and `web/vendor/libheif/README.md`.
+
+Also added: a panorama that arrives taller than it is wide is now rejected outright.
+It is either not a panorama or it came through rotated, and every angle derived from
+its aspect ratio downstream would otherwise be quietly wrong.
+
 ### Reproducing
 
 ```powershell
@@ -215,6 +251,12 @@ clean empty space above and below rather than being stretched over a full sphere
 
 ## 7. Changelog
 
+- **2026-08-22 (HEIC)** — Panorama upload failed on iPhone files: no browser but Safari
+  decodes HEIC, and the error message blamed HEIC for every decode failure regardless of
+  cause. Vendored libheif as WebAssembly, loaded only when a container sniff confirms HEIC
+  and only after the native decoder has already failed. Verified end to end in headless
+  Edge against a real HEIC. Adds the project's only non-MIT dependency (LGPL-3.0);
+  compliance notes in `THIRD_PARTY_LICENSES.md`.
 - **2026-08-22 (capture rework)** — Real footage exposed that the video path does not
   hold up: uneven panning and hand wobble, and raising the frame count fixes every metric
   while making the image worse. Two plausible diagnoses were measured and discarded (see

@@ -72,8 +72,96 @@ export async function readGPano(file) {
  */
 const MAX_DECODE_WIDTH = 8192;
 
+/**
+ * What kind of file is this really?
+ *
+ * The extension and the browser-reported MIME type both lie: Windows hands over
+ * ".jpg" for things that are not, and a HEIC dragged out of a synced iCloud
+ * folder often arrives with an empty type. Only the first few bytes are honest,
+ * and getting this right decides whether the seller is told something true or is
+ * sent chasing a camera setting that was never the problem.
+ */
+async function sniff(file) {
+  const b = new Uint8Array(await file.slice(0, 64).arrayBuffer());
+  const ascii = (o, n) => String.fromCharCode(...b.subarray(o, o + n));
+
+  if (b[0] === 0xff && b[1] === 0xd8) return 'jpeg';
+  if (b[0] === 0x89 && ascii(1, 3) === 'PNG') return 'png';
+  if (ascii(0, 4) === 'RIFF' && ascii(8, 4) === 'WEBP') return 'webp';
+
+  // ISO base media: [size][ftyp][major brand][minor version][compatible brands...].
+  // The major brand is not enough on its own - the sample iPhone files carry
+  // major brand "mif1" with "heic" only appearing further down the list.
+  if (ascii(4, 4) === 'ftyp') {
+    const size = Math.min((b[0] << 24) | (b[1] << 16) | (b[2] << 8) | b[3], b.length);
+    const brands = [];
+    for (let o = 8; o + 4 <= size; o += 4) if (o !== 12) brands.push(ascii(o, 4));
+    if (brands.some((x) => x === 'avif' || x === 'avis')) return 'avif';
+    if (brands.some((x) => /^(heic|heix|hevc|hevx|heim|heis|hevm|hevs|mif1|msf1)$/.test(x))) return 'heic';
+    return 'video';
+  }
+  return 'unknown';
+}
+
+/**
+ * Decode a HEIC ourselves, because no browser but Safari will.
+ *
+ * iPhones write HEIC by default, and Panorama mode is no exception, so this is
+ * not an edge case for our seller - it is the default path. Telling them to go
+ * and change Camera > Formats works, but only after they have already failed
+ * once and lost the photo they were trying to upload.
+ *
+ * libheif is 1.2 MB of WebAssembly, which is why it is imported here and not at
+ * the top of the file: it is fetched only when a HEIC actually turns up, and
+ * never at all on Safari, whose native decoder is both present and faster.
+ */
+async function decodeHeic(file, onStage) {
+  onStage?.('Converting HEIC…');
+  const { default: libheifFactory } = await import('../vendor/libheif/libheif-bundle.js');
+  const libheif = await libheifFactory();
+
+  const images = new libheif.HeifDecoder().decode(new Uint8Array(await file.arrayBuffer()));
+  if (!images?.length) throw new Error('That HEIC file contains no image.');
+
+  // A HEIC holds several images: the photo, a thumbnail, sometimes a depth map.
+  // The biggest one is the photo.
+  const image = images.reduce((a, b) => (b.get_width() * b.get_height() > a.get_width() * a.get_height() ? b : a));
+  const w = image.get_width();
+  const h = image.get_height();
+
+  const full = document.createElement('canvas');
+  full.width = w;
+  full.height = h;
+  const fullCtx = full.getContext('2d');
+  const imageData = fullCtx.createImageData(w, h);
+  await new Promise((resolve, reject) => {
+    image.display(imageData, (out) =>
+      out ? resolve(out) : reject(new Error('libheif could not render that HEIC.'))
+    );
+  });
+  fullCtx.putImageData(imageData, 0, 0);
+  images.forEach((im) => im.free?.());
+
+  if (w <= MAX_DECODE_WIDTH) return full;
+
+  const scaled = document.createElement('canvas');
+  scaled.width = MAX_DECODE_WIDTH;
+  scaled.height = Math.max(1, Math.round((h * MAX_DECODE_WIDTH) / w));
+  const ctx = scaled.getContext('2d');
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(full, 0, 0, scaled.width, scaled.height);
+  full.width = full.height = 0; // release ~230 MB before the next file is read
+  return scaled;
+}
+
+/** Human wording for a file we recognise but cannot use. */
+const WRONG_KIND = {
+  video: 'That is a video, not a photo. Use the "Room video" button for clips.',
+  unknown: 'That file is not an image the browser recognises.',
+};
+
 /** Decode a File into something canvas can draw, bounded in size. */
-async function decode(file) {
+async function decode(file, onStage) {
   if (window.createImageBitmap) {
     try {
       // resizeWidth alone preserves the aspect ratio, and only shrinks because
@@ -86,10 +174,15 @@ async function decode(file) {
         resizeQuality: 'high',
       });
     } catch (err) {
+      // Native decoding failed. Before blaming the format, find out what the
+      // format actually is - the previous version of this blamed HEIC for every
+      // failure, including the ones that were nothing of the sort.
+      const kind = await sniff(file).catch(() => 'unknown');
+      if (kind === 'heic') return await decodeHeic(file, onStage);
       throw new Error(
-        `That image could not be decoded (${err.message}). HEIC files from an iPhone often ` +
-        'cannot be read by a browser - set Camera > Formats to "Most Compatible", or share ' +
-        'the photo to yourself first so it converts to JPEG.'
+        WRONG_KIND[kind] ||
+        `That ${kind.toUpperCase()} could not be decoded by this browser (${err.message}). ` +
+        'Try re-exporting it as a JPEG.'
       );
     }
   }
@@ -119,8 +212,8 @@ async function decode(file) {
  * f comes from the VERTICAL field of view, which is fixed by the lens. The
  * horizontal sweep is then read off the width - see below for why that way round.
  */
-export async function cylindricalToEquirect(file, { vfovDeg = PANO_VFOV_DEG, haovDeg = null, maxWidth = 4096, degPerPx = null } = {}) {
-  const src = await decode(file);
+export async function cylindricalToEquirect(file, { vfovDeg = PANO_VFOV_DEG, haovDeg = null, maxWidth = 4096, degPerPx = null, onStage = null } = {}) {
+  const src = await decode(file, onStage);
   const sw = src.width;
   const sh = src.height;
 
@@ -171,8 +264,8 @@ export async function cylindricalToEquirect(file, { vfovDeg = PANO_VFOV_DEG, hao
 }
 
 /** Re-draw an already-equirectangular image, capping its width. */
-export async function normaliseEquirect(file, geometry, maxWidth = 4096) {
-  const src = await decode(file);
+export async function normaliseEquirect(file, geometry, maxWidth = 4096, onStage = null) {
+  const src = await decode(file, onStage);
   const k = Math.min(1, maxWidth / src.width);
   const canvas = document.createElement('canvas');
   canvas.width = Math.round(src.width * k);
@@ -352,21 +445,37 @@ async function encode(canvas) {
  * Turn one or more panorama photos of a room into a single equirectangular
  * image plus the angles Pannellum needs to place it on the sphere.
  */
-export async function preparePanorama(files, { vfovDeg, haovDeg } = {}) {
+export async function preparePanorama(files, { vfovDeg, haovDeg, onStage = null } = {}) {
   const list = Array.from(files);
 
   const patches = [];
-  for (const file of list) {
+  for (const [i, file] of list.entries()) {
+    const label = list.length > 1 ? ` (${i + 1} of ${list.length})` : '';
+    const stage = (text) => onStage?.(text + label);
+    stage('Reading panorama…');
+
     const gpano = await readGPano(file);
-    patches.push(
-      gpano
-        ? { source: 'photosphere', ...(await normaliseEquirect(file, gpano)) }
-        : { source: 'cylindrical', ...(await cylindricalToEquirect(file, { vfovDeg, haovDeg })) }
-    );
+    const patch = gpano
+      ? { source: 'photosphere', ...(await normaliseEquirect(file, gpano, 4096, stage)) }
+      : { source: 'cylindrical', ...(await cylindricalToEquirect(file, { vfovDeg, haovDeg, onStage: stage })) };
+
+    // A panorama is wider than it is tall - always, whatever the projection. A
+    // portrait one means the image arrived rotated, and every angle derived from
+    // its aspect ratio below would be nonsense. Catch it here rather than storing
+    // a room the viewer cannot make sense of.
+    if (patch.canvas.height > patch.canvas.width) {
+      throw new Error(
+        `"${file.name}" is taller than it is wide, so it is either not a panorama or it came ` +
+        'through rotated. Open it, rotate it upright, and save it again.'
+      );
+    }
+    patches.push(patch);
   }
 
+  if (list.length > 1) onStage?.(`Joining ${list.length} sweeps…`);
   const merged = patches.length === 1 ? patches[0] : mergePatches(patches);
 
+  onStage?.('Encoding…');
   const blob = await encode(merged.canvas);
 
   return {

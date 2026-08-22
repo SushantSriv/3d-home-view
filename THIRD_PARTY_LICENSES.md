@@ -54,6 +54,26 @@ Upstream: https://github.com/supabase/supabase-js — MIT License.
 
 ---
 
+## libheif / libde265  — LGPL-3.0, not MIT
+
+HEIC decoder. Vendored unmodified in `web/vendor/libheif/` as the WebAssembly build
+published by [libheif-js](https://github.com/catdad-experiments/libheif-js) v1.18.2.
+Upstream: https://github.com/strukturag/libheif
+
+This is the one dependency here that is **not** permissively licensed, so it is
+called out rather than listed. libheif and the libde265 HEVC decoder inside it are
+LGPL-3.0. The full texts are `web/vendor/libheif/COPYING.LESSER` (LGPL-3.0) and
+`COPYING` (GPL-3.0, which the LGPL incorporates by reference).
+
+Nothing about that licence reaches the rest of this repository. LGPL-3.0 §4 permits
+combining the library with a work under any licence provided the library stays
+replaceable, and here it plainly is: it is an unmodified separate file, dynamically
+imported at runtime, and swapping in a different build means overwriting one file.
+See `web/vendor/libheif/README.md` for the compliance notes and where the
+corresponding source lives.
+
+---
+
 ## Transitive Python dependencies
 
 `opencv-python-headless` (Apache-2.0), `numpy` (BSD-3-Clause), `Pillow` (MIT-CMU),
