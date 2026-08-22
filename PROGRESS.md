@@ -18,10 +18,10 @@ commit as the work it describes.
 | 1 | Stitching pipeline proof of concept | ✅ Done | Validated on a synthetic pan with known ground truth. See [section 6](#6-stitching-tuning-notes). |
 | 2 | Basic 360° viewer (Pannellum) | ✅ Done | Proven by the demo tour, no backend involved |
 | 3 | Upload flow (video → stitch → panorama URL) | ✅ Done | Full loop proven against the live project — see [section 6](#6-stitching-tuning-notes) |
-| 4 | Floor plan + click-to-place pins | 🟡 Built | Schema live; awaiting your first real tour to confirm |
+| 4 | Floor plan + click-to-place pins | 🟡 Built | Data path proven; the click-and-drag UI itself still wants a human test |
 | 5 | Connected viewer (floor plan ↔ 360° rooms) | ✅ Done | Demo tour walks four linked rooms |
 | 6 | Shareable public link + error handling | ✅ Done | Random 7-char slugs, publish toggle, `/tour/<slug>` pretty URLs |
-| 7 | Deploy (Pages + cloud stitching worker) | 🟡 Site live | Local worker proven; the Actions cron is armed but has not yet run a real job |
+| 7 | Deploy (Pages + cloud stitching worker) | ✅ Done | Site live; a real job stitched start to finish on GitHub's runners |
 | 8 | *Added:* studio authentication | ⬜ Deferred | See [risk R1](#5-risks--open-questions) |
 
 Legend: ✅ done · 🟡 in progress · ⬜ not started · 🔴 blocked on someone else
@@ -55,25 +55,28 @@ be exercised offline.
       clip: upload → queue → worker claims → stitches → uploads → `complete_job` → published tour
       readable with no key. Still worth repeating with real footage.
 - [x] **Step 7 — Share links + polish.** Slugs, publish toggle, `404.html` rewrite, failure copy.
-- [x] **Step 8a — Cloud worker workflow + secrets.** Armed; has not yet processed a real job.
-- [ ] **Step 8b — Confirm the cloud worker.** Stop the local worker, upload, run the workflow.
+- [x] **Step 8a — Cloud worker workflow + secrets.** Armed and connected.
+- [x] **Step 8b — Cloud worker confirmed.** A queued job was stitched end to end on a GitHub runner
+      (Python 3.12, `opencv-python-headless`) with this machine uninvolved: 367.8° recovered,
+      panorama uploaded, source video deleted, job marked done. Whole run took 3 minutes.
 
 ---
 
 ## 3. What only you can do
 
-Everything I could do without you is done. What is left:
+Everything that did not require your hands is done, including a full end-to-end proof of the
+pipeline. What genuinely remains:
 
-| # | Action | Blocks | Cost | Done? |
+| # | Action | Why it needs you | Cost | Done? |
 |---|---|---|---|---|
-| 1 | **Record a real room video** — phone held **upright** (this matters, see section 6), one slow full turn, 20–30 s, standing in one spot, framing furniture and edges rather than bare wall. | Step 6b | free | ⬜ |
-| 2 | **Walk one tour through the studio** — <https://sushantsriv.github.io/3d-home-view/studio.html>. Create a property, upload a floor plan, drop pins, upload that video, then run `./worker/run_local.ps1` and watch the room go `queued → processing → done`. | Step 6b | free | ⬜ |
-| 3 | **Confirm the cloud worker** once the local loop works: stop the local worker, upload another clip, then `gh workflow run stitch-worker.yml`. | Step 8b | free | ⬜ |
-| 4 | *Optional:* buy a domain if `sushantsriv.github.io/3d-home-view` is not good enough for a listing. | polish | ~$12/yr | ⬜ |
+| 1 | **Record a real room video** — phone held **upright**, one slow full turn, 20–30 s, standing in one spot, framing furniture and edges rather than bare wall. | The pipeline is proven on synthetic footage. Rolling shutter, motion blur, dim light and blank walls are still untested. | free | ⬜ |
+| 2 | **Walk one tour through the studio by hand** at <https://sushantsriv.github.io/3d-home-view/studio.html> — upload a floor plan, drop and drag pins, upload that video. | I exercised the data path with direct API calls; the click-and-drag UI has never been touched by a human. | free | ⬜ |
+| 3 | **Delete the `Synthetic test room` tour** once you have a real one. | It is published on your live site as proof the loop works. | free | ⬜ |
+| 4 | *Optional:* buy a domain if `sushantsriv.github.io/3d-home-view` is not good enough for a finn.no listing. | — | ~$12/yr | ⬜ |
 
-**Already done:** GitHub auth, public repo + Pages, Supabase project, schema applied, storage
-buckets, Python 3.14 + virtualenv + dependencies, `.env` with the service key, and both Actions
-secrets.
+**Already done and verified:** GitHub auth, public repo, Pages, both Actions secrets, Supabase
+schema, storage buckets and their policies, Python + virtualenv + dependencies, `.env`, the local
+worker, and the cloud worker.
 
 ### The anon key vs. the service key
 
@@ -218,6 +221,12 @@ result in the viewer with `tour.html?pano=<url>`.
 
 ## 7. Changelog
 
+- **2026-08-22 (end of session)** — Proved the whole chain against the live project, twice: once
+  with the local worker, once entirely on a GitHub runner with this machine uninvolved. Upload →
+  queue → claim → stitch → upload → publish → fetched with no key. That run exposed the orientation
+  bug (393° for one turn) now fixed by deriving FOV from frame shape. Also confirmed the write-only
+  video bucket really is write-only: anon LIST returns `[]` and READ returns 400, while the service
+  key sees the object.
 - **2026-08-22 (later)** — Repo pushed public, Pages live, Actions secrets set. Supabase schema
   applied and independently verified (tables, buckets, and that `claim_next_job` is denied to anon).
   Python 3.14 + OpenCV 5 environment built; confirmed all 46 cv2 symbols upstream uses still exist.
