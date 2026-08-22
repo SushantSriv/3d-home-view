@@ -9,6 +9,7 @@
  */
 
 import { renderFloorPlan, bearingBetween } from './floorplan.js';
+import { BUCKETS } from './config.js';
 
 const params = new URLSearchParams(location.search);
 const els = {
@@ -30,6 +31,22 @@ let demo = null; // demo module, imported only when needed
 
 /** Rooms that can actually be entered. A room with no panorama yet is still on the plan. */
 const viewable = () => (tour?.rooms || []).filter((r) => r.panorama_url || tour.is_demo);
+
+/**
+ * The database stores STORAGE PATHS, not URLs, so that the project can be renamed
+ * without rewriting every row. Turn them into CDN URLs once, here, rather than at
+ * each use site - forgetting one is how the viewer ended up asking GitHub Pages
+ * for a panorama that lives in Supabase.
+ *
+ * publicUrl() passes absolute URLs through untouched and returns null for empty
+ * input, so this is safe to run over data the demo tour never touches.
+ */
+function resolveStorageUrls(db, t) {
+  t.floor_plan_url = db.publicUrl(BUCKETS.floorPlans, t.floor_plan_url);
+  for (const room of t.rooms || []) {
+    room.panorama_url = db.publicUrl(BUCKETS.panoramas, room.panorama_url);
+  }
+}
 
 function showMessage(title, bodyHtml) {
   els.msgInner.innerHTML = `<h1>${title}</h1>${bodyHtml}`;
@@ -67,6 +84,7 @@ const hideMessage = () => els.msg.classList.add('hidden');
           `<p class="muted">The owner has not finished it. Ask them to press <em>Publish</em> in the studio.</p>`
         );
       }
+      resolveStorageUrls(db, tour);
     } else {
       return showMessage(
         '360&deg; Home Tour',
