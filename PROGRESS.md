@@ -1,8 +1,9 @@
 # Progress & Plan
 
 **Last updated:** 2026-08-22
-**Live site:** _not deployed yet — blocked on [action #2](#3-what-only-you-can-do)_
-**Supabase:** project `ikuovilpewamyareelqm` created; schema not applied yet
+**Live site:** <https://sushantsriv.github.io/3d-home-view/> · [demo tour](https://sushantsriv.github.io/3d-home-view/tour.html?demo=1)
+**Repo:** <https://github.com/SushantSriv/3d-home-view> (public)
+**Supabase:** project `ikuovilpewamyareelqm` — schema applied and verified
 
 This file is the single source of truth for where the project stands. It is updated in the same
 commit as the work it describes.
@@ -14,13 +15,13 @@ commit as the work it describes.
 | # | Milestone | Status | Notes |
 |---|---|---|---|
 | 0 | Repo, README, licenses, progress tracking | ✅ Done | git repo initialised, first commit made |
-| 1 | Stitching pipeline proof of concept | 🔴 Blocked | Code written and wired; needs **Python 3.12** → [action #1](#3-what-only-you-can-do) |
+| 1 | Stitching pipeline proof of concept | ✅ Done | Validated on a synthetic pan with known ground truth. See [section 6](#6-stitching-tuning-notes). |
 | 2 | Basic 360° viewer (Pannellum) | ✅ Done | Proven by the demo tour, no backend involved |
-| 3 | Upload flow (video → stitch → panorama URL) | 🟡 Built, untested | Needs schema applied + a worker running |
-| 4 | Floor plan + click-to-place pins | 🟡 Built, untested | Needs schema applied → [action #3](#3-what-only-you-can-do) |
+| 3 | Upload flow (video → stitch → panorama URL) | 🟡 Upload works | Storage + queue verified end to end; full loop not yet run on a real clip |
+| 4 | Floor plan + click-to-place pins | 🟡 Built | Schema live; awaiting your first real tour to confirm |
 | 5 | Connected viewer (floor plan ↔ 360° rooms) | ✅ Done | Demo tour walks four linked rooms |
 | 6 | Shareable public link + error handling | ✅ Done | Random 7-char slugs, publish toggle, `/tour/<slug>` pretty URLs |
-| 7 | Deploy (Pages + cloud stitching worker) | 🔴 Blocked | Workflows written; needs `gh auth login` and Actions secrets |
+| 7 | Deploy (Pages + cloud stitching worker) | 🟡 Site live | Pages deploying on push; cloud worker armed but never yet run a real job |
 | 8 | *Added:* studio authentication | ⬜ Deferred | See [risk R1](#5-risks--open-questions) |
 
 Legend: ✅ done · 🟡 in progress · ⬜ not started · 🔴 blocked on someone else
@@ -40,38 +41,38 @@ be exercised offline.
 
 ## 2. Execution steps
 
-- [x] **Step 1 — Repo skeleton.** `git init`, `.gitignore`, `.gitattributes`, README, LICENSE,
-      THIRD_PARTY_LICENSES, this file. *(Milestone 0)*
-- [ ] **Step 2 — GitHub.** `gh` 2.98 installed. **Waiting on `gh auth login`**, then repo creation,
-      push, and enabling Pages.
-- [x] **Step 3 — Static site + demo mode.** Whole `web/` app built and serving. *(Milestones 2, 5, 6)*
-- [x] **Step 4a — Supabase code.** `schema.sql`, storage buckets, RLS, job-queue functions, and the
-      studio UI that drives them. Project URL + anon key wired into `web/js/config.js`.
-- [ ] **Step 4b — Apply the schema.** Yours: run `supabase/schema.sql`. *(Milestones 3, 4)*
-- [x] **Step 5a — Stitcher code.** Upstream pinned as a submodule, wrapper + phone-tuned config written.
-- [ ] **Step 5b — Run a real stitch.** Blocked on Python 3.12 and a test video. *(Milestone 1)*
+- [x] **Step 1 — Repo skeleton.** git, `.gitignore`, `.gitattributes`, README, licenses, this file.
+- [x] **Step 2 — GitHub.** Public repo created, pushed, Pages enabled (source: Actions), both
+      Actions secrets set. Site live.
+- [x] **Step 3 — Static site + demo mode.** Whole `web/` app built and deployed. *(Milestones 2, 5, 6)*
+- [x] **Step 4a — Supabase code.** Schema, buckets, RLS, job-queue functions, studio UI.
+- [x] **Step 4b — Schema applied.** Verified live: 3 tables readable by anon, 3 buckets with the
+      right visibility, `claim_next_job()` denied to anon (401) and working for the service key.
+- [x] **Step 5 — Stitcher proven.** Runs end to end on a synthetic pan with known ground truth.
+      *(Milestone 1 — see [section 6](#6-stitching-tuning-notes))*
 - [x] **Step 6a — Worker code.** `worker.py` + `run_local.ps1`, atomic claim/complete/fail.
-- [ ] **Step 6b — Prove the loop.** Upload in the studio → stitch locally → panorama in the tour.
-- [x] **Step 7 — Share links + polish.** Slugs, publish toggle, `404.html` rewrite, friendly failure copy.
-- [x] **Step 8a — Cloud worker workflow.** `stitch-worker.yml` written.
-- [ ] **Step 8b — Enable it.** Add the two Actions secrets. *(Milestone 7)*
+- [ ] **Step 6b — Prove the loop on a real clip.** Upload in the studio → `./worker/run_local.ps1`
+      → panorama appears in the tour. **This is the next thing to do, and it needs your video.**
+- [x] **Step 7 — Share links + polish.** Slugs, publish toggle, `404.html` rewrite, failure copy.
+- [x] **Step 8a — Cloud worker workflow + secrets.** Armed; has not yet processed a real job.
+- [ ] **Step 8b — Confirm the cloud worker.** Stop the local worker, upload, run the workflow.
 
 ---
 
 ## 3. What only you can do
 
-I cannot create accounts, complete interactive logins, or hold your credentials. These are yours,
-in the order that unblocks the most:
+Everything I could do without you is done. What is left:
 
 | # | Action | Blocks | Cost | Done? |
 |---|---|---|---|---|
-| 1 | **Run `gh auth login`** in a terminal, pick GitHub.com → HTTPS → browser. Then tell me, and I'll create the public repo, push, and turn on Pages. | Step 2, live URL | free | ⬜ |
-| 2 | **Run `supabase/schema.sql`** in the [SQL editor](https://supabase.com/dashboard/project/ikuovilpewamyareelqm/sql). Walkthrough: [`supabase/README.md`](supabase/README.md). | Steps 4b, 6b | free | ⬜ |
-| 3 | **Install Python 3.12** from [python.org](https://www.python.org/downloads/) — tick *"Add python.exe to PATH"*. The `python` on your PATH today is the Microsoft Store stub, not an interpreter. Then run `./scripts/bootstrap.ps1`. | Steps 5b, 6b | free | ⬜ |
-| 4 | **Copy the `service_role` key** from Project Settings → API into a local `.env` (start from `.env.example`). | Step 6b | free | ⬜ |
-| 5 | **Record a test room video** — slow, steady full turn, 20–30 s, phone at chest height, generous overlap. Include furniture and edges, not just bare wall. | Step 5b | free | ⬜ |
-| 6 | **Add Actions secrets** `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` (repo Settings → Secrets and variables → Actions). | Step 8b | free | ⬜ |
-| 7 | *Optional:* install ffmpeg; *optional:* buy a domain for a nicer share URL. | polish | ~$12/yr | ⬜ |
+| 1 | **Record a real room video** — phone held **upright** (this matters, see section 6), one slow full turn, 20–30 s, standing in one spot, framing furniture and edges rather than bare wall. | Step 6b | free | ⬜ |
+| 2 | **Walk one tour through the studio** — <https://sushantsriv.github.io/3d-home-view/studio.html>. Create a property, upload a floor plan, drop pins, upload that video, then run `./worker/run_local.ps1` and watch the room go `queued → processing → done`. | Step 6b | free | ⬜ |
+| 3 | **Confirm the cloud worker** once the local loop works: stop the local worker, upload another clip, then `gh workflow run stitch-worker.yml`. | Step 8b | free | ⬜ |
+| 4 | *Optional:* buy a domain if `sushantsriv.github.io/3d-home-view` is not good enough for a listing. | polish | ~$12/yr | ⬜ |
+
+**Already done:** GitHub auth, public repo + Pages, Supabase project, schema applied, storage
+buckets, Python 3.14 + virtualenv + dependencies, `.env` with the service key, and both Actions
+secrets.
 
 ### The anon key vs. the service key
 
@@ -116,9 +117,13 @@ anon write policies in `schema.sql` for owner-scoped ones behind Supabase magic-
 - GitHub Actions: unlimited on public repos, but **scheduled workflows are disabled after 60 days
   of repository inactivity**, and cron runs can be delayed several minutes under load.
 
-**R3 — Stitch quality is the real unknown.** Feature-based stitching of a handheld pan can fail on
-blank walls, low light, or a fast pan. Milestone 1 exists to find those limits before more is built
-on top. `hfov_deg` is the first knob to turn; findings go in section 6.
+**R3 — Stitch quality on *real* footage is still unproven.** The pipeline is validated against a
+synthetic pan (section 6), which settles the geometry and the configuration but says nothing about
+rolling shutter, motion blur, dim light, or the blank walls of an empty Nordic flat. Expect
+`min_inliers` and `hfov_deg` to need attention on the first real clip. A second, known limitation:
+a single-height pan only covers a horizontal band, and the uncovered parts are currently filled with
+stretched edge pixels — cropping to the covered band and declaring Pannellum's `vaov` would look far
+better.
 
 **R4 — Actions runners are CPU-only.** Fine at 4096 px, but if stitching turns out slow the fallback
 is a free Hugging Face Space running the same `worker.py`.
@@ -131,28 +136,84 @@ a real listing, the next idea is to derive heading from the panorama itself.
 
 ## 6. Stitching tuning notes
 
-_Empty until Milestone 1 runs on a real clip._
+**Milestone 1 is validated.** Not on a phone clip yet — on a synthetic one. `stitcher/make_test_video.py`
+builds a textured virtual room, renders the equirectangular panorama a perfect camera would see,
+then re-renders that as a handheld pan with pitch/roll wobble and auto-exposure drift. Because the
+ground truth is kept, the reconstruction can be judged rather than admired.
 
-Starting point in [`stitcher/config.template.yaml`](stitcher/config.template.yaml), and why each
-value differs from upstream's tripod-photo defaults:
+### What was measured
+
+| Run | Recovered rotation | Coverage | Result |
+|---|---|---|---|
+| Landscape, `rotation_smoothing_window: 17` | — | 21.6 % | Heavy ghosting; every object doubled |
+| Landscape, window `3` | **362.0°** | 22.2 % | Sharp, correctly ordered walls |
+| **Portrait, window `3`** | **367.6°** | **36.0 %** | Sharp, and far more floor and ceiling |
+
+Closure validated in both good runs (frame 46/47 matched frame 0 with 101–336 inliers), so drift is
+being cancelled as intended.
+
+### Three findings that changed the defaults
+
+**1. `rotation_smoothing_window` must scale with degrees-per-frame, not frames.** This was my bug.
+Upstream smooths by averaging rotation *matrices* across the window, which is only valid while those
+rotations are small. Their example uses `17` because their `interval` extraction produces ~375 frames
+about 1° apart. I switched to 48 uniform frames — 7.5° apart — where a window of 17 averages across
+±60° of yaw and collapses the sweep. Changing the extraction method silently invalidated their
+smoothing value. Now `3`, with the reasoning recorded next to it in `config.template.yaml`.
+
+**2. Tell sellers to hold the phone upright.** A landscape 16:9 frame at 64° HFOV has only a 39°
+vertical field, so a single-height pan covers a ±19° band — 33 % of the sphere at best. Rotate the
+same phone and the tall axis carries the wide angle: 64° vertical, a ±32° band, 53 %. Measured
+22 % → 36 % actual panorama coverage from the identical scene. It is the cheapest quality win
+available and costs nothing but a sentence of guidance, now shown on the landing page and next to
+every video upload field.
+
+**3. `hfov_deg` must match the orientation.** Landscape ≈ 64, portrait ≈ 39. Get it wrong and the
+panorama either repeats itself or fails to close. This remains the first knob to turn on a bad stitch.
+
+### Still open
+
+- **The uncovered band still looks bad.** Above and below the covered band the pipeline stretches
+  edge pixels into long vertical smears. Pannellum supports partial panoramas via `haov`/`vaov`/
+  `vOffset`; cropping the output to the genuinely covered band and declaring `vaov` would show clean
+  empty space instead of smear. Worth doing before anyone shows this to a buyer.
+- **Runtime:** ~70 s per room on 8 cores at 4096 px, 48 frames. Comfortable for a GitHub Actions run.
+- **Not yet tested on real footage:** rolling shutter, motion blur, low light, and blank Nordic walls
+  are all absent from the synthetic scene. Expect `min_inliers` to need attention on a real clip.
+
+### Defaults and why they differ from upstream
 
 | Setting | Ours | Upstream | Reason |
 |---|---|---|---|
-| `intrinsics.hfov_deg` | 64 | 42 | Phone *video* is cropped versus stills. **The first knob to turn.** Panorama repeats itself → lower it; doesn't close → raise it. |
-| `video_extraction.method` | `uniform` (48 frames) | `interval` (every 2nd) | A 25 s clip at 30 fps would give ~375 frames — minutes of matching for no gain. Fixed count keeps runtime predictable. |
-| `matching.match_full_res` | `false` @ 1280 px | `true` | Video frames are softer than stills; matching at 1280 is nearly as accurate and several times faster. |
+| `intrinsics.hfov_deg` | 64 (landscape) / 39 (portrait) | 42 | Phone *video* is cropped versus stills. Must match orientation. |
+| `matching.rotation_smoothing_window` | **3** | 17 (their example) | Measured above. Matrix averaging is only valid for small rotations. |
+| `video_extraction.method` | `uniform`, 48 frames | `interval`, every 2nd | A 25 s clip at 30 fps gives ~375 frames — minutes of matching for no gain. |
+| `matching.match_full_res` | `false` @ 1280 px | `true` | Video frames are softer than stills; much faster, nearly as accurate. |
 | `matching.min_inliers` | 90 | 200 | 200 is a high bar for a plain painted wall. |
 | `matching.use_clahe` | `true` | `false` | Buys back features in dim rooms. |
-| `disable_circular_closure` | `false` | `true` | A room pan should return to its start; detecting that cancels drift. |
-| `blending.method` | `multiband` | `none` | Auto-exposure always shifts when panning past a window; `none` leaves visible steps. |
+| `disable_circular_closure` | `false` | `true` | A room pan returns to its start; detecting that cancels drift. |
+| `blending.method` | `multiband` | `none` | Auto-exposure always shifts panning past a window. |
 
-To record: actual runtime per clip, minimum usable length, whether 48 frames is enough, and the
-failure modes worth reporting back to the seller.
+### Reproducing
+
+```powershell
+.venv\Scripts\python.exe stitcher\make_test_video.py --out out\testroom --portrait --width 1080 --hfov 38.7
+.venv\Scripts\python.exe stitcher\stitch_room.py  --video out\testroom\pan.mp4 --out out\testroom\stitched --hfov 38.7
+```
+
+Then compare `out\testroom\truth.jpg` against `out\testroom\stitched\panorama.jpg`, or load the
+result in the viewer with `tour.html?pano=<url>`.
 
 ---
 
 ## 7. Changelog
 
+- **2026-08-22 (later)** — Repo pushed public, Pages live, Actions secrets set. Supabase schema
+  applied and independently verified (tables, buckets, and that `claim_next_job` is denied to anon).
+  Python 3.14 + OpenCV 5 environment built; confirmed all 46 cv2 symbols upstream uses still exist.
+  **Milestone 1 validated** against a synthetic pan with known ground truth, which caught three
+  configuration bugs — see section 6. Fixed a real defect found by the first studio upload: videos
+  were sent with `upsert`, which the write-only `raw-videos` policy correctly refuses.
 - **2026-08-22** — Project bootstrapped from `home-tour-app-claude-code-brief.md`. Researched the
   hosting constraints (Pages is static-only and needs a public repo on the free plan) and settled on
   browser → Supabase → offline-worker. Built the full static site including an offline demo tour,

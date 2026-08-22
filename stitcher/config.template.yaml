@@ -50,14 +50,29 @@ matching:
   # detect that closure cancels accumulated drift, which is what stops the two
   # ends of the panorama disagreeing. Set true if the seller only panned part way.
   disable_circular_closure: false
-  rotation_smoothing_window: 17
+  # MEASURED, do not raise this casually. Upstream smooths by averaging rotation
+  # MATRICES across the window, which is only valid while the rotations in it are
+  # small. Their example uses 17 because their `interval` extraction yields ~375
+  # frames at ~1 deg apart. We extract 48 frames at ~7.5 deg apart, where a window
+  # of 17 averages across +/-60 deg of yaw and collapses the sweep: measured 21.6%
+  # coverage and heavy ghosting at 17, versus 362 deg of recovered rotation and a
+  # clean stitch at 3. The right value scales with degrees-per-frame, not frames.
+  rotation_smoothing_window: 3
 
 intrinsics:
-  # THE most important knob. Phone VIDEO is cropped relative to the same phone's
-  # stills, so the still-photo value upstream ships (42) is far too narrow and
-  # produces a panorama that wraps past 360 deg. ~64 deg matches the main rear
-  # camera of most recent iPhone and Pixel models in 1080p/4K video mode.
-  # If the panorama repeats itself, lower this. If it does not close, raise it.
+  # THE most important knob, and it is the HORIZONTAL field of view of the frame
+  # as recorded - which depends on how the phone was held.
+  #
+  #   landscape 16:9  -> ~64   (vertical fov ~39, covers a +/-19 deg band = 33% of the sphere)
+  #   portrait  9:16  -> ~39   (vertical fov ~64, covers a +/-32 deg band = 53% of the sphere)
+  #
+  # Measured on the synthetic test pan: landscape reached 22% panorama coverage,
+  # portrait 36% from the identical scene. Sellers should be told to hold the
+  # phone UPRIGHT; it is the single cheapest quality win available.
+  #
+  # Upstream ships 42, which suits still photos - phone video is cropped tighter
+  # than the same phone's stills. If the panorama repeats itself, lower this;
+  # if the two ends do not meet, raise it.
   hfov_deg: 64
   calib_json: null
 

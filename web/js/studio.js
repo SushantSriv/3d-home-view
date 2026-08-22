@@ -246,6 +246,9 @@ function roomCard(room, i) {
     <div class="field">
       <label>Room video ${job ? '(replaces the current one)' : ''}</label>
       <input class="f-video" type="file" accept="video/*">
+      <p class="muted" style="margin:.3rem 0 0;font-size:.78rem">
+        Phone held <strong>upright</strong>, one slow full turn, 20&ndash;30 s, standing still.
+      </p>
     </div>
 
     <div class="job"></div>
