@@ -64,13 +64,13 @@ export async function readGPano(file) {
 }
 
 /**
- * Largest source width we will decode. A panorama straight off a phone can be
- * 13000 x 4500, which is 58 megapixels and about 230 MB once expanded to RGBA.
- * That is enough to make canvas.toBlob() quietly return null - which is exactly
- * how an upload came to write a zero-byte file while reporting success. We never
- * output more than 4096 wide anyway, so decoding bigger buys nothing.
+ * Largest source width we will work with. A panorama straight off a phone is
+ * 10786 x 3706 or bigger - forty megapixels, 160 MB once expanded to RGBA - and
+ * holding two or three copies of that is what makes canvas operations start
+ * failing instead of throwing. Since 4096 is also the widest image we ever
+ * output, decoding above it costs memory and buys nothing.
  */
-const MAX_DECODE_WIDTH = 8192;
+const MAX_DECODE_WIDTH = 4096;
 
 /**
  * What kind of file is this really?
@@ -129,29 +129,22 @@ async function decodeHeic(file, onStage) {
   const w = image.get_width();
   const h = image.get_height();
 
-  const full = document.createElement('canvas');
-  full.width = w;
-  full.height = h;
-  const fullCtx = full.getContext('2d');
-  const imageData = fullCtx.createImageData(w, h);
+  // libheif hands back raw pixels, so go straight from those to a bitmap the
+  // browser has already shrunk for us. Painting them into a full-size canvas on
+  // the way would mean holding forty megapixels twice over - a real panorama is
+  // 10786 x 3706, which is 160 MB per copy - and that is the sort of pressure
+  // under which canvas operations start failing rather than throwing.
+  const pixels = new ImageData(w, h);
   await new Promise((resolve, reject) => {
-    image.display(imageData, (out) =>
+    image.display(pixels, (out) =>
       out ? resolve(out) : reject(new Error('libheif could not render that HEIC.'))
     );
   });
-  fullCtx.putImageData(imageData, 0, 0);
   images.forEach((im) => im.free?.());
 
-  if (w <= MAX_DECODE_WIDTH) return full;
-
-  const scaled = document.createElement('canvas');
-  scaled.width = MAX_DECODE_WIDTH;
-  scaled.height = Math.max(1, Math.round((h * MAX_DECODE_WIDTH) / w));
-  const ctx = scaled.getContext('2d');
-  ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(full, 0, 0, scaled.width, scaled.height);
-  full.width = full.height = 0; // release ~230 MB before the next file is read
-  return scaled;
+  return w <= MAX_DECODE_WIDTH
+    ? await createImageBitmap(pixels)
+    : await createImageBitmap(pixels, { resizeWidth: MAX_DECODE_WIDTH, resizeQuality: 'high' });
 }
 
 /** Human wording for a file we recognise but cannot use. */
@@ -160,19 +153,28 @@ const WRONG_KIND = {
   unknown: 'That file is not an image the browser recognises.',
 };
 
-/** Decode a File into something canvas can draw, bounded in size. */
-async function decode(file, onStage) {
+/**
+ * Decode a File into something canvas can draw, bounded in size.
+ *
+ * Every return here is checked by decode() below, because the one thing this
+ * must never do is hand back nothing at all: an undefined reaching drawImage
+ * surfaces as a wall of WebIDL type names that says nothing about which decoder
+ * gave up or why.
+ */
+async function decodeSource(file, onStage) {
   if (window.createImageBitmap) {
     try {
-      // resizeWidth alone preserves the aspect ratio, and only shrinks because
-      // we ask for it only when the source is genuinely wider.
       const probe = await createImageBitmap(file);
       if (probe.width <= MAX_DECODE_WIDTH) return probe;
-      probe.close?.();
-      return await createImageBitmap(file, {
+      // Shrink the bitmap we already have rather than decoding the file a second
+      // time. The old two-pass version decoded forty megapixels twice, which on
+      // a phone panorama is most of the wait.
+      const resized = await createImageBitmap(probe, {
         resizeWidth: MAX_DECODE_WIDTH,
         resizeQuality: 'high',
       });
+      probe.close?.();
+      return resized;
     } catch (err) {
       // Native decoding failed. Before blaming the format, find out what the
       // format actually is - the previous version of this blamed HEIC for every
@@ -198,6 +200,22 @@ async function decode(file, onStage) {
   } finally {
     URL.revokeObjectURL(url);
   }
+}
+
+async function decode(file, onStage) {
+  const src = await decodeSource(file, onStage);
+  const drawable =
+    (typeof ImageBitmap !== 'undefined' && src instanceof ImageBitmap) ||
+    src instanceof HTMLCanvasElement ||
+    src instanceof HTMLImageElement;
+  if (!drawable) {
+    throw new Error(
+      `"${file.name}" decoded to nothing usable (${Object.prototype.toString.call(src)}). This is ` +
+      'a bug in the app rather than a problem with your photo - please report it, and try a JPEG ' +
+      'export in the meantime.'
+    );
+  }
+  return src;
 }
 
 /**
@@ -351,6 +369,69 @@ function bestOffset(base, patch, fullW, minOverlapPx) {
   return best;
 }
 
+/** Shrink a canvas to fit a width ceiling, preserving its aspect ratio. */
+function capWidth(canvas, maxWidth) {
+  if (canvas.width <= maxWidth) return canvas;
+  const out = document.createElement('canvas');
+  out.width = maxWidth;
+  out.height = Math.max(1, Math.round((canvas.height * maxWidth) / canvas.width));
+  const ctx = out.getContext('2d');
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(canvas, 0, 0, out.width, out.height);
+  return out;
+}
+
+/**
+ * Trim the 360-degree working canvas down to the arc that actually has pixels
+ * on it.
+ *
+ * The compositing above happens on a full circle because that is the only frame
+ * in which two sweeps can be positioned relative to each other. But handing that
+ * canvas to the viewer while declaring haov as the covered arc tells it to spread
+ * a full circle of image across, say, 225 degrees - so everything ends up in the
+ * wrong place. The image and the angle have to describe the same thing, and the
+ * honest one is the covered arc.
+ *
+ * The run is found with wrap-around, because the gap in a two-sweep panorama is
+ * quite often behind the photographer, straddling the 0-degree line.
+ */
+function cropToCoverage(out, degPerPx) {
+  const fullW = out.width;
+  const { filled } = toGrayRow(out);
+  const covered = filled.reduce((a, b) => a + b, 0);
+  if (covered >= fullW * 0.985) return { canvas: out, haov: 360, wrapped: true };
+
+  let bestStart = 0;
+  let bestLen = 0;
+  let start = 0;
+  let len = 0;
+  for (let i = 0; i < fullW * 2 && bestLen < fullW; i++) {
+    if (filled[i % fullW]) {
+      if (len === 0) start = i;
+      if (++len > bestLen) {
+        bestLen = len;
+        bestStart = start;
+      }
+    } else {
+      len = 0;
+    }
+  }
+  if (!bestLen) return { canvas: out, haov: 360, wrapped: false };
+
+  const crop = document.createElement('canvas');
+  crop.width = Math.min(bestLen, fullW);
+  crop.height = out.height;
+  const cx = crop.getContext('2d');
+
+  const s = bestStart % fullW;
+  const head = Math.min(crop.width, fullW - s);
+  cx.drawImage(out, s, 0, head, out.height, 0, 0, head, out.height);
+  const tail = crop.width - head;
+  if (tail > 0) cx.drawImage(out, 0, 0, tail, out.height, head, 0, tail, out.height);
+
+  return { canvas: crop, haov: crop.width * degPerPx, wrapped: false };
+}
+
 /**
  * Composite the patches onto one 360-degree canvas.
  * Returns the canvas plus how much of the circle actually got covered.
@@ -405,17 +486,23 @@ function mergePatches(patches) {
     ctx.restore();
   }
 
-  const { filled } = toGrayRow(out);
-  const coveredPx = filled.reduce((a, b) => a + b, 0);
+  const cropped = cropToCoverage(out, degPerPx);
+
+  // Two sweeps composited at their own resolution can come out wider than either
+  // of them - 6826 px for a 225-degree join here. Older phone GPUs cap a texture
+  // at 4096, and the viewer is the one thing in this project that has to work on
+  // a stranger's handset, so bring it back to the same ceiling as everything else.
+  const canvas = capWidth(cropped.canvas, MAX_DECODE_WIDTH);
+  const { haov, wrapped } = cropped;
 
   return {
-    canvas: out,
-    haov: Math.min(360, coveredPx * degPerPx),
+    canvas,
+    haov,
     vaov: Math.max(...patches.map((p) => p.vaov)),
     vOffset: 0,
-    degPerPx,
+    degPerPx: haov / canvas.width,
     placements,
-    wrapped: coveredPx >= fullW * 0.985,
+    wrapped,
   };
 }
 

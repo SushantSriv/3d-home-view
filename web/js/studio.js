@@ -435,10 +435,12 @@ async function uploadPanorama(room, input) {
   const jobBox = input.closest('.room-item').querySelector('.job');
   jobBox.innerHTML = `<div class="progress indeterminate"><i></i></div><p class="muted">Reading panorama&hellip;</p>`;
   const note = jobBox.querySelector('p');
+  let placements = null; // read again after the try block, so it has to live out here
 
   try {
     const { preparePanorama } = await import('./pano.js');
     const pano = await preparePanorama(files, { onStage: (text) => (note.textContent = text) });
+    placements = pano.placements;
 
     if (pano.vaov < 25) {
       throw new Error(
@@ -474,6 +476,22 @@ async function uploadPanorama(room, input) {
   }
 
   await reload();
+
+  // A join is found by correlating the overlap, and correlation cannot tell a
+  // true match from a merely plausible one. Two sweeps with a real gap between
+  // them still produce a confident-looking answer - measured at 0.67 against
+  // 1.03 for a genuine 45-degree overlap - so say when the evidence was thin
+  // rather than quietly deciding on the seller's behalf.
+  const weak = (placements || []).filter((pl) => pl.score != null && pl.score < 0.8);
+  if (weak.length) {
+    flash(
+      `The sweeps were joined, but the matching overlap was weak. Check the room looks right; ` +
+      `if walls are cut off or repeated, re-shoot with the second sweep starting further back ` +
+      `into the first - about a third of a sweep of overlap is plenty.`,
+      'err'
+    );
+    return;
+  }
 
   if (room.haov < 330) {
     flash(

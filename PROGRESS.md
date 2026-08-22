@@ -240,6 +240,56 @@ Also added: a panorama that arrives taller than it is wide is now rejected outri
 It is either not a panorama or it came through rotated, and every angle derived from
 its aspect ratio downstream would otherwise be quietly wrong.
 
+### Memory, and a bug that hid behind a WebIDL error message
+
+The first HEIC upload of a real photo failed with `Failed to execute 'drawImage':
+The provided value is not of type '(CSSImageValue or HTMLCanvasElement or ...)'`.
+That message names every type Chromium accepts and so says nothing about which
+decoder gave up. Testing each candidate value directly established that only
+`undefined`, `null`, a plain object or an `ImageData` produce it — a zero-sized
+canvas and a closed `ImageBitmap` both give a different, named `InvalidStateError`.
+
+The underlying cause is memory. The real file is 10786 × 3706 — forty megapixels,
+160 MB as RGBA — and the code held three copies at once: the `ImageData` from
+libheif, a full-size canvas painted from it, and the downscaled canvas. Reproduced
+with GPU acceleration on (the earlier tests had run `--disable-gpu`, which is why
+they passed): the renderer died partway through encoding and never came back.
+
+Fixed by never creating the full-size canvas. `createImageBitmap(imageData,
+{ resizeWidth })` goes straight from libheif's pixels to a bitmap the browser has
+already shrunk. `MAX_DECODE_WIDTH` also dropped from 8192 to 4096, which is the
+widest image this app ever outputs, so decoding above it only ever cost memory.
+The native path stopped decoding the file twice as well — it now resizes the
+bitmap it already has, which was a large part of the wait on a 40 MP photo.
+
+`decode()` now asserts that what it returns is actually drawable, so any future
+failure of this kind names itself instead of surfacing as a wall of type names.
+
+### Joining two sweeps, finally tested on real pixels
+
+The merge had shipped without ever running on real files. Tested by cutting the
+real panorama into two overlapping sweeps — 0–60 % and 40–100 %, so 135° each with
+45° of overlap — and feeding them back in: recovered **224.9°**, the exact width of
+the original, correlation score 1.025.
+
+That test also exposed a genuine bug. Compositing happens on a full-circle canvas,
+because that is the only frame in which two sweeps can be positioned relative to
+one another, but the result was handed to the viewer still full-circle wide while
+declaring `haov` as the covered arc — so the viewer would spread 360° of image
+across 225°. `cropToCoverage()` now trims to the covered arc, finding the longest
+run with wrap-around because the gap is often behind the photographer. Verified by
+checking the image's aspect ratio against the declared angles: 3.306 vs 3.307.
+
+Merged output is also capped at 4096 wide. Two sweeps composited at their own
+resolution came out 6826 px, and older phone GPUs cap a texture at 4096 — the
+viewer is the one part of this project that has to work on a stranger's handset.
+
+**What the join cannot do:** with a real gap between the sweeps it still reports a
+confident-looking answer. Two halves with a 22° gap scored 0.667 against 1.025 for
+a true overlap, and were pulled together into 194°, losing the gap. A single
+correlation score cannot separate a true match from a plausible one, so the studio
+now says when the evidence was thin rather than deciding silently.
+
 ### Reproducing
 
 ```powershell
@@ -251,6 +301,13 @@ its aspect ratio downstream would otherwise be quietly wrong.
 
 ## 7. Changelog
 
+- **2026-08-22 (HEIC, part two)** — The first real HEIC upload failed on an opaque
+  WebIDL type error. Cause was memory: three copies of a 40 MP image live at once, which
+  kills the renderer rather than throwing. Now goes straight from libheif's pixels to a
+  bounded `ImageBitmap`, decode ceiling halved to 4096, and the native path no longer
+  decodes the file twice. Sweep joining tested on real pixels for the first time, which
+  found a projection bug — the merged canvas was full-circle wide while declaring a
+  partial `haov` — now cropped to its real coverage and capped for old phone GPUs.
 - **2026-08-22 (HEIC)** — Panorama upload failed on iPhone files: no browser but Safari
   decodes HEIC, and the error message blamed HEIC for every decode failure regardless of
   cause. Vendored libheif as WebAssembly, loaded only when a container sniff confirms HEIC
