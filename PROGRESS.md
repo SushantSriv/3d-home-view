@@ -17,11 +17,11 @@ commit as the work it describes.
 | 0 | Repo, README, licenses, progress tracking | ✅ Done | git repo initialised, first commit made |
 | 1 | Stitching pipeline proof of concept | ✅ Done | Validated on a synthetic pan with known ground truth. See [section 6](#6-stitching-tuning-notes). |
 | 2 | Basic 360° viewer (Pannellum) | ✅ Done | Proven by the demo tour, no backend involved |
-| 3 | Upload flow (video → stitch → panorama URL) | 🟡 Upload works | Storage + queue verified end to end; full loop not yet run on a real clip |
+| 3 | Upload flow (video → stitch → panorama URL) | ✅ Done | Full loop proven against the live project — see [section 6](#6-stitching-tuning-notes) |
 | 4 | Floor plan + click-to-place pins | 🟡 Built | Schema live; awaiting your first real tour to confirm |
 | 5 | Connected viewer (floor plan ↔ 360° rooms) | ✅ Done | Demo tour walks four linked rooms |
 | 6 | Shareable public link + error handling | ✅ Done | Random 7-char slugs, publish toggle, `/tour/<slug>` pretty URLs |
-| 7 | Deploy (Pages + cloud stitching worker) | 🟡 Site live | Pages deploying on push; cloud worker armed but never yet run a real job |
+| 7 | Deploy (Pages + cloud stitching worker) | 🟡 Site live | Local worker proven; the Actions cron is armed but has not yet run a real job |
 | 8 | *Added:* studio authentication | ⬜ Deferred | See [risk R1](#5-risks--open-questions) |
 
 Legend: ✅ done · 🟡 in progress · ⬜ not started · 🔴 blocked on someone else
@@ -51,8 +51,9 @@ be exercised offline.
 - [x] **Step 5 — Stitcher proven.** Runs end to end on a synthetic pan with known ground truth.
       *(Milestone 1 — see [section 6](#6-stitching-tuning-notes))*
 - [x] **Step 6a — Worker code.** `worker.py` + `run_local.ps1`, atomic claim/complete/fail.
-- [ ] **Step 6b — Prove the loop on a real clip.** Upload in the studio → `./worker/run_local.ps1`
-      → panorama appears in the tour. **This is the next thing to do, and it needs your video.**
+- [x] **Step 6b — Loop proven.** Ran the whole chain against the live project with the synthetic
+      clip: upload → queue → worker claims → stitches → uploads → `complete_job` → published tour
+      readable with no key. Still worth repeating with real footage.
 - [x] **Step 7 — Share links + polish.** Slugs, publish toggle, `404.html` rewrite, failure copy.
 - [x] **Step 8a — Cloud worker workflow + secrets.** Armed; has not yet processed a real job.
 - [ ] **Step 8b — Confirm the cloud worker.** Stop the local worker, upload, run the workflow.
@@ -170,6 +171,15 @@ every video upload field.
 
 **3. `hfov_deg` must match the orientation.** Landscape ≈ 64, portrait ≈ 39. Get it wrong and the
 panorama either repeats itself or fails to close. This remains the first knob to turn on a bad stitch.
+
+### A fourth finding, from the first end-to-end run
+
+**The worker cannot ask the seller which way they held the phone, so it works it out.** The first
+real queue run stitched the portrait clip with the landscape default and reported **393°** of
+rotation for one full turn — a ~9 % over-rotation that shows up as a duplicated seam. `stitch_room.py`
+now derives the horizontal FOV from each video's frame shape (`horizontal_fov()`), assuming a 64°
+long-axis sensor: 1920×1080 → 64°, 1080×1920 → 38.7°, 1440×1920 → 50.2°. Re-running the identical
+job gave **367.6°**. Nobody has to configure anything.
 
 ### Still open
 

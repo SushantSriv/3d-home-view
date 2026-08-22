@@ -60,6 +60,10 @@ matching:
   rotation_smoothing_window: 3
 
 intrinsics:
+  # NOTE: stitch_room.py normally overwrites this per video, deriving the true
+  # horizontal FOV from the frame's shape (see horizontal_fov()). The value here
+  # is the landscape fallback and what `--hfov` replaces if you set it by hand.
+  #
   # THE most important knob, and it is the HORIZONTAL field of view of the frame
   # as recorded - which depends on how the phone was held.
   #

@@ -19,6 +19,7 @@ Then eyeball the result:
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import shutil
 import subprocess
@@ -44,6 +45,26 @@ for _stream in (sys.stdout, sys.stderr):
 
 # Below this, a pan simply has not covered enough angle to close a sphere.
 MIN_USEFUL_SECONDS = 8.0
+
+# Field of view along the phone's LONG sensor axis, in degrees. Roughly right for
+# the main rear camera of recent iPhone and Pixel models in video mode. The short
+# axis follows from the frame's aspect ratio -- see horizontal_fov().
+LONG_AXIS_FOV_DEG = 64.0
+
+
+def horizontal_fov(width: int, height: int, long_axis_fov: float = LONG_AXIS_FOV_DEG) -> float:
+    """
+    Horizontal field of view of a frame, given the sensor's long-axis FOV.
+
+    This has to be derived per video, not configured once. A seller holding the
+    phone upright produces a 1080x1920 frame whose HORIZONTAL field is only ~39
+    degrees, while the same phone held sideways gives ~64. Feed the pipeline the
+    landscape number for a portrait clip and it thinks each frame is wider than it
+    is, spaces them too far apart, and reports ~393 degrees of rotation for what
+    was one full turn -- which shows up as a duplicated seam.
+    """
+    focal = (max(width, height) / 2) / math.tan(math.radians(long_axis_fov) / 2)
+    return math.degrees(2 * math.atan((width / 2) / focal))
 
 
 class StitchError(RuntimeError):
@@ -149,6 +170,13 @@ def stitch(video: Path, out_dir: Path, **overrides) -> StitchResult:
             "room with enough overlap between frames. Re-record a slow, steady full turn of "
             "20-30 seconds, keeping the phone at chest height."
         )
+
+    # Derive the field of view from the frame shape unless told otherwise. This is
+    # what makes a portrait clip stitch correctly without the seller knowing anything.
+    if overrides.get("hfov") is None:
+        overrides = {**overrides, "hfov": round(horizontal_fov(w, h), 2)}
+        orientation = "portrait" if h > w else "landscape"
+        print(f"[stitch] {orientation} frame -> horizontal fov {overrides['hfov']} deg", flush=True)
 
     print(f"[stitch] {video.name}: {seconds:.1f}s, {frames} frames, {w}x{h}", flush=True)
 
