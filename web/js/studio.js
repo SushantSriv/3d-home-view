@@ -264,10 +264,10 @@ function roomCard(room, i) {
       <label>Panorama photo &mdash; best quality, ready in seconds</label>
       <div class="filepick">
         <label class="btn sm primary">
-          <input class="f-photo" type="file" accept="image/*" hidden>
+          <input class="f-photo" type="file" accept="image/*" multiple hidden>
           ${room.panorama_url ? 'Replace panorama' : 'Choose panorama'}
         </label>
-        <span class="fname muted">Your phone's Panorama mode. Nothing to stitch, no waiting.</span>
+        <span class="fname muted">Your phone's Panorama mode. Pick two sweeps to cover a whole room.</span>
       </div>
       <p class="muted" style="margin:.35rem 0 0;font-size:.78rem">
         Stand in the middle, hold the phone <strong>upright</strong>, and sweep a full circle
@@ -314,13 +314,17 @@ function roomCard(room, i) {
 
   if (room.panorama_url) {
     const done = document.createElement('div');
-    // Cache-bust: re-stitching a room overwrites the same storage key, so without
-    // this the studio keeps showing the previous panorama from the browser cache.
-    const src = `${db.publicUrl(BUCKETS.panoramas, room.panorama_url)}?t=${
-      job?.finished_at ? Date.parse(job.finished_at) : ''
-    }`;
+    // No cache-busting needed: panorama paths are timestamped, so a replacement
+    // is a different URL and can never be served from the old cache entry.
+    const src = db.publicUrl(BUCKETS.panoramas, room.panorama_url);
     done.innerHTML = `
       <img class="thumb" loading="lazy" src="${src}" alt="Panorama of ${esc(room.label)}">
+      ${room.haov < 330
+        ? `<p class="muted" style="margin:.4rem 0 0;font-size:.78rem">
+             Covers <strong>${Math.round(room.haov)}&deg;</strong> of ${360}&deg; &mdash; the rest of the
+             room is missing. Re-shoot with a full sweep to fix it.
+           </p>`
+        : ''}
       <div style="margin-top:.5rem">
         <a class="btn sm primary" target="_blank" rel="noopener"
            href="tour.html?t=${encodeURIComponent(property.share_slug)}">Open the tour</a>
@@ -417,12 +421,13 @@ async function uploadVideo(room, input) {
  * cannot fail. The room is finished by the time this returns.
  */
 async function uploadPanorama(room, input) {
-  const file = input.files[0];
-  if (!file) return;
-  if (file.size > LIMITS.maxPanoramaBytes) {
+  const files = Array.from(input.files || []);
+  if (!files.length) return;
+  const oversized = files.find((f) => f.size > LIMITS.maxPanoramaBytes);
+  if (oversized) {
     input.value = '';
     throw new Error(
-      `That image is ${(file.size / 1048576).toFixed(0)} MB. Panoramas over ` +
+      `"${oversized.name}" is ${(oversized.size / 1048576).toFixed(0)} MB. Panoramas over ` +
       `${LIMITS.maxPanoramaBytes / 1048576} MB are usually a mistake - export it smaller.`
     );
   }
@@ -433,7 +438,10 @@ async function uploadPanorama(room, input) {
 
   try {
     const { preparePanorama } = await import('./pano.js');
-    const pano = await preparePanorama(file);
+    note.textContent = files.length > 1
+      ? `Joining ${files.length} sweeps…`
+      : 'Reading panorama…';
+    const pano = await preparePanorama(files);
 
     if (pano.vaov < 25) {
       throw new Error(
@@ -442,10 +450,11 @@ async function uploadPanorama(room, input) {
       );
     }
 
-    note.textContent =
-      pano.source === 'photosphere'
-        ? `Photo Sphere, ${Math.round(pano.haov)}° wide. Uploading…`
-        : `Converted to equirectangular, ${Math.round(pano.vaov)}° tall. Uploading…`;
+    const kind = { photosphere: 'Photo Sphere', merged: `${pano.parts} sweeps joined`, cylindrical: 'Converted' };
+    note.innerHTML =
+      `${kind[pano.source] || 'Converted'} &mdash; ` +
+      `<strong>${Math.round(pano.haov)}&deg;</strong> around, ` +
+      `${Math.round(pano.vaov)}&deg; tall. Uploading&hellip;`;
 
     jobBox.querySelector('.progress').classList.remove('indeterminate');
     const bar = jobBox.querySelector('.progress > i');
@@ -454,18 +463,31 @@ async function uploadPanorama(room, input) {
       bar.style.width = `${Math.round(frac * 100)}%`;
     });
 
+    const previous = room.panorama_url;
     Object.assign(room, await db.updateRoom(room.id, {
       panorama_url: path,
       haov: pano.haov,
       vaov: pano.vaov,
       v_offset: pano.vOffset,
     }));
+    // Only once the row points at the new file, so a failure never orphans the room.
+    if (previous && previous !== path) await db.deletePanorama(previous);
   } finally {
     input.value = '';
   }
 
   await reload();
-  flash(`"${room.label}" is ready. No stitching needed.`, 'ok');
+
+  if (room.haov < 330) {
+    flash(
+      `"${room.label}" is ready, but the sweep only covers ${Math.round(room.haov)}° of the ` +
+      `room, so part of it is missing. The viewer will stop at the edges rather than show a gap. ` +
+      `See "Getting the whole room" below for how to capture the full circle.`,
+      'err'
+    );
+  } else {
+    flash(`"${room.label}" is ready — full ${Math.round(room.haov)}°. No stitching needed.`, 'ok');
+  }
 }
 
 /** Read a clip's duration without uploading it, so we can reject hopeless ones early. */

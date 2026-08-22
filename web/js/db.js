@@ -180,6 +180,11 @@ export async function enqueueVideo(roomId, storagePath, meta = {}) {
  * The endpoint and headers are exactly what supabase-js would have sent.
  */
 function upload(bucket, path, file, onProgress, contentType, upsert = false) {
+  // Independent of whatever produced this blob. A zero-byte upload succeeds at
+  // every layer and leaves a broken image behind, so it must never leave here.
+  if (!file || !file.size) {
+    return Promise.reject(new Error('Nothing to upload - the file came out empty.'));
+  }
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('POST', `${SUPABASE_URL}/storage/v1/object/${bucket}/${path}`);
@@ -247,9 +252,19 @@ export async function uploadFloorPlan(propertyId, file, onProgress) {
  * is nothing for the worker to do, so the room is finished the moment this returns.
  */
 export async function uploadRoomPanorama(propertyId, roomId, blob, onProgress) {
-  const path = `${propertyId}/${roomId}.jpg`;
-  await upload(BUCKETS.panoramas, path, blob, onProgress, 'image/jpeg', true);
+  // Timestamped, not a fixed per-room key. Panoramas are served with a long
+  // cache lifetime, so overwriting one in place leaves viewers - and the studio
+  // itself - looking at the previous version for an hour.
+  const path = `${propertyId}/${roomId}-${Date.now()}.jpg`;
+  await upload(BUCKETS.panoramas, path, blob, onProgress, 'image/jpeg');
   return path;
+}
+
+/** Remove a superseded panorama so replaced rooms do not accumulate orphans. */
+export async function deletePanorama(path) {
+  if (!path || /^https?:/.test(path)) return;
+  const { error } = await sb.storage.from(BUCKETS.panoramas).remove([path]);
+  if (error) console.warn('Could not remove the old panorama:', error.message);
 }
 
 export async function uploadRoomVideo(propertyId, roomId, file, onProgress) {

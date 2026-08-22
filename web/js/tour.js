@@ -234,6 +234,22 @@ function mountViewer(panoramaUrl, extra = {}) {
     delete config.haov;
     delete config.vaov;
     delete config.vOffset;
+  } else {
+    // Fence the view to what the panorama actually covers. A phone sweep that
+    // stopped at 240 degrees leaves a third of the room missing, and letting
+    // someone drag into that void is worse than simply not letting them: the
+    // view now comes to a stop at the edge of the real image.
+    if (config.haov < 359.9) {
+      config.minYaw = -config.haov / 2;
+      config.maxYaw = config.haov / 2;
+      config.yaw = 0;
+    }
+    if (config.vaov < 179.9) {
+      config.minPitch = config.vOffset - config.vaov / 2;
+      config.maxPitch = config.vOffset + config.vaov / 2;
+    }
+    // Do not let the zoom pull back further than the image can fill.
+    config.maxHfov = Math.min(config.maxHfov, Math.max(60, config.haov * 0.9));
   }
   // Only meaningful for remote images; setting it on a data: URL is pointless noise.
   if (/^https?:/i.test(panoramaUrl)) config.crossOrigin = 'anonymous';
