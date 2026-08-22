@@ -341,6 +341,74 @@ link is most likely to be opened on. It now folds shut on a small screen on the 
 in (once only, so it does not undo the visitor's own choice) and has a height
 ceiling when open.
 
+### Guided in-browser 360 capture — the third capture path, and the good one
+
+Asked for directly: *"can we not just get the full 360 panorama from our own web
+app camera interface, that will be very easy, it will also guide us, rather than
+depending on iPhone's camera?"* Yes, and it removes the problem the other two
+paths keep losing to.
+
+**The point.** Both earlier paths handed the hard part to something we do not
+control. Stitching a video means inferring camera motion from pixels, which loses
+to blank walls and repeating skirting board. Panorama mode means accepting
+whatever the phone decides to give — typically 220°, with no way to ask for more.
+A phone *knows where it is pointing*. Take yaw and pitch from the gyroscope and
+placing a frame becomes arithmetic: it cannot mismatch, cannot double an armchair,
+and does not care that three walls look identical.
+
+**The projection** (`web/js/sphere.js`). For a pinhole camera, a direction at yaw θ
+and pitch φ relative to the camera axis lands at `u = f·tan(θ)`, `v = f·tan(φ)/cos(θ)`.
+`u` depends on θ alone, so along a column of constant θ the vertical mapping is the
+ordinary cylindrical tan() curve with effective focal length `f/cos(θ)`. That makes
+the whole thing separable into two `drawImage` passes rather than a per-pixel loop:
+per column, read `u = f·tan(θ)` and scale vertically by `cos(θ)`; per row, the
+standard cylindrical→equirectangular remap. 24 frames composite in 1.3 s.
+
+The vertical pinch at the frame edges is not an approximation — the top corners of
+a rectilinear frame genuinely sit at a lower pitch than the top centre, so a frame
+covers a bow-tie of the sphere. Overlapping frames fill the pinched corners in.
+
+**Focal length, measured rather than looked up.** No browser API reports a camera's
+field of view. But if the phone says it turned by Δθ and the picture slid by Δx,
+then `f = Δx/Δθ` — the phone measures one, the image measures the other, and no
+device table is needed. First attempt read 5.2% long, because content does not
+slide uniformly: a feature at angle θ moves at `f·sec²θ`, so correlating the full
+frame width averages in the fast-moving edges. Correlating only the middle half and
+correcting by the mean of sec²θ over that band (`tan θc / θc`, with θc from the
+first estimate) brought it to **1.5%**.
+
+**Verified against ground truth.** Frames were synthesised from the real `stue`
+panorama at known angles by a deliberately separate per-pixel renderer, pushed
+through the builder, and the result compared with the original:
+
+| check | result |
+|---|---|
+| similarity to the original | correlation **0.9964**, mean abs error **1.9 / 255** |
+| full sweep, 24 frames | haov 360.0, vaov 77.4 (true camera vfov 77.4) |
+| image aspect vs declared angles | 4.649 vs 4.649 |
+| partial sweep, 8 frames over 105° | haov 166.9 (expected 167) |
+| sweep aimed 10° up | vOffset 10.0 |
+| focal self-calibration | 62.7° against a true 62° |
+
+Orientation handling was checked separately: `cameraFromOrientation` is
+round-tripped against the W3C matrix over **560 device attitudes**, worst
+basis-vector error **5.9e-16**. Doing it through the rotation matrix rather than
+reading `beta` as "pitch" is what makes it survive the phone not being held in the
+one attitude the shortcut assumes.
+
+**The flow itself** was run end to end in headless Edge with a fake camera and
+synthetic `deviceorientation` events: overlay mounts, camera opens, one synthetic
+turn reaches 100% coverage with all 60 strip cells lit, and it emits a 4096-wide
+panorama whose aspect matches its declared angles exactly. Cancel resolves null and
+leaves nothing behind.
+
+**What is still unproven, and can only be proven on a handset:** the real camera,
+the real sensors, and iOS's motion-permission prompt (which only works from inside
+a genuine tap, hence the explicit Start button). Sensor drift over a full turn is
+the main open question — if it shows, the fix is to refine each frame's yaw against
+the image using the correlation machinery that is already there, with the sensor
+reading as the starting point rather than the answer.
+
 ### Reproducing
 
 ```powershell
@@ -352,6 +420,13 @@ ceiling when open.
 
 ## 7. Changelog
 
+- **2026-08-22 (guided capture)** — Added `Capture 360°`: the app drives the camera and
+  reads the phone's motion sensors, so frame placement is arithmetic instead of inference,
+  and the sweep continues until coverage is actually complete rather than stopping where
+  Panorama mode chooses. Projection verified against the real panorama at 0.9964 correlation;
+  orientation maths round-trips exactly over 560 attitudes. Also fixed the merged-canvas
+  height, which was derived from the tallest source canvas rather than the shared scale and
+  left the output about 3% taller than the angles it declared.
 - **2026-08-22 (viewer)** — Fixed zoom that never resolved on a tall viewport: the limits
   were constants that only suited 16:9, and on a phone in portrait the image could not fill
   the frame at any allowed zoom. They now come from the panorama's own `vaov` and the live

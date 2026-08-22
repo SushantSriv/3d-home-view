@@ -261,18 +261,27 @@ function roomCard(room, i) {
     </div>
 
     <div class="field">
-      <label>Panorama photo &mdash; best quality, ready in seconds</label>
+      <label>Capture 360&deg; &mdash; guided, on a phone</label>
       <div class="filepick">
-        <label class="btn sm primary">
+        <button class="btn sm primary f-capture" type="button">Open camera</button>
+        <span class="fname muted">Turn on the spot and it tells you what is still missing.</span>
+      </div>
+      <p class="muted" style="margin:.35rem 0 0;font-size:.78rem">
+        Uses the phone's own motion sensors, so it knows where each frame belongs rather than
+        guessing from the picture &mdash; and it does not stop at 220&deg; the way Panorama mode does.
+        Needs a phone: a laptop has no sensors.
+      </p>
+    </div>
+
+    <div class="field">
+      <label>&hellip;or a panorama photo you already took</label>
+      <div class="filepick">
+        <label class="btn sm">
           <input class="f-photo" type="file" accept="image/*,.heic,.heif" multiple hidden>
           ${room.panorama_url ? 'Replace panorama' : 'Choose panorama'}
         </label>
         <span class="fname muted">Your phone's Panorama mode. Pick two sweeps to cover a whole room.</span>
       </div>
-      <p class="muted" style="margin:.35rem 0 0;font-size:.78rem">
-        Stand in the middle, hold the phone <strong>upright</strong>, and sweep a full circle
-        following the on-screen guide.
-      </p>
     </div>
 
     <div class="field">
@@ -361,6 +370,7 @@ function roomCard(room, i) {
 
   node.querySelector('.f-video').onchange = guard((ev) => uploadVideo(room, ev.target));
   node.querySelector('.f-photo').onchange = guard((ev) => uploadPanorama(room, ev.target));
+  node.querySelector('.f-capture').onclick = guard(() => captureAndStore(room, node));
 
   return node;
 }
@@ -414,6 +424,52 @@ async function uploadVideo(room, input) {
   flash(`"${room.label}" is queued. You can keep adding rooms, or close this page.`, 'ok');
 }
 
+/** Upload a prepared panorama and point the room at it. Shared by every source. */
+async function storePanorama(room, pano, bar) {
+  const path = await db.uploadRoomPanorama(property.id, room.id, pano.blob, (frac) => {
+    if (bar) bar.style.width = `${Math.round(frac * 100)}%`;
+  });
+
+  const previous = room.panorama_url;
+  Object.assign(room, await db.updateRoom(room.id, {
+    panorama_url: path,
+    haov: pano.haov,
+    vaov: pano.vaov,
+    v_offset: pano.vOffset,
+  }));
+  // Only once the row points at the new file, so a failure never orphans the room.
+  if (previous && previous !== path) await db.deletePanorama(previous);
+}
+
+/**
+ * Capture a room with the guided camera instead of a file.
+ *
+ * The result is the same shape a prepared photo produces, so from here on nothing
+ * downstream knows or cares which one the seller used.
+ */
+async function captureAndStore(room, node) {
+  const { captureRoom } = await import('./capture.js');
+  const pano = await captureRoom({ label: room.label || 'the room' });
+  if (!pano) return; // backed out
+
+  const jobBox = node.querySelector('.job');
+  jobBox.innerHTML = `<div class="progress"><i></i></div>
+    <p class="muted">Captured <strong>${Math.round(pano.haov)}&deg;</strong> around from
+    ${pano.parts} frames. Uploading&hellip;</p>`;
+  await storePanorama(room, pano, jobBox.querySelector('.progress > i'));
+
+  await reload();
+  if (room.haov < 330) {
+    flash(
+      `"${room.label}" is ready at ${Math.round(room.haov)}°. Part of the room is still missing - ` +
+      `open the camera again and turn further to fill it in.`,
+      'err'
+    );
+  } else {
+    flash(`"${room.label}" captured — full ${Math.round(room.haov)}°, measured lens ${Math.round(pano.hfov)}° wide.`, 'ok');
+  }
+}
+
 /**
  * A panorama photo needs no worker. The phone already did the stitching - far
  * better than we could offline, because it had the gyroscope and live feedback -
@@ -458,19 +514,7 @@ async function uploadPanorama(room, input) {
     jobBox.querySelector('.progress').classList.remove('indeterminate');
     const bar = jobBox.querySelector('.progress > i');
 
-    const path = await db.uploadRoomPanorama(property.id, room.id, pano.blob, (frac) => {
-      bar.style.width = `${Math.round(frac * 100)}%`;
-    });
-
-    const previous = room.panorama_url;
-    Object.assign(room, await db.updateRoom(room.id, {
-      panorama_url: path,
-      haov: pano.haov,
-      vaov: pano.vaov,
-      v_offset: pano.vOffset,
-    }));
-    // Only once the row points at the new file, so a failure never orphans the room.
-    if (previous && previous !== path) await db.deletePanorama(previous);
+    await storePanorama(room, pano, bar);
   } finally {
     input.value = '';
   }

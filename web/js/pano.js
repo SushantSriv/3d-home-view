@@ -439,7 +439,12 @@ function cropToCoverage(out, degPerPx) {
 function mergePatches(patches) {
   const degPerPx = Math.max(...patches.map((p) => p.degPerPx));
   const fullW = Math.round(360 / degPerPx);
-  const height = Math.max(...patches.map((p) => p.canvas.height));
+  // Height must be derived from the SHARED scale, not from the tallest source
+  // canvas. Those canvases are each at their own degrees-per-pixel, so taking the
+  // max of them left the composite about 3% taller than the vaov it declares -
+  // measured as an image of 4096x797 carrying angles that call for 4096x774.
+  const vaov = Math.max(...patches.map((p) => p.vaov));
+  const height = Math.max(1, Math.round(vaov / degPerPx));
 
   const out = document.createElement('canvas');
   out.width = fullW;
@@ -498,7 +503,7 @@ function mergePatches(patches) {
   return {
     canvas,
     haov,
-    vaov: Math.max(...patches.map((p) => p.vaov)),
+    vaov,
     vOffset: 0,
     degPerPx: haov / canvas.width,
     placements,
