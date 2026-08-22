@@ -125,6 +125,9 @@ begin
     with check (bucket_id in ('floor-plans', 'panoramas'));
 
   -- Write-only drop box: the browser may upload a video but never list or read one.
+  -- INSERT only, deliberately. The client must therefore upload videos WITHOUT
+  -- upsert: upsert asks storage for INSERT-or-UPDATE and this policy denies the
+  -- UPDATE half. Video paths are timestamped, so nothing ever needs overwriting.
   create policy "tour_video_upload" on storage.objects
     for insert to anon, authenticated
     with check (bucket_id = 'raw-videos');

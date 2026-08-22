@@ -19,6 +19,7 @@ Then eyeball the result:
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
@@ -30,6 +31,16 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parent.parent
 UPSTREAM = REPO_ROOT / "third_party" / "360-spherical-stitching"
 TEMPLATE = Path(__file__).resolve().parent / "config.template.yaml"
+
+# The upstream pipeline prints check marks and degree signs. A Windows console
+# defaults to cp1252, which cannot encode them, and the resulting
+# UnicodeEncodeError would kill a stitch that had already succeeded. Take the
+# replacement characters instead.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(errors="replace")
+    except (AttributeError, ValueError):  # already wrapped, or not a real stream
+        pass
 
 # Below this, a pan simply has not covered enough angle to close a sphere.
 MIN_USEFUL_SECONDS = 8.0
@@ -100,6 +111,8 @@ def build_config(video: Path, out_dir: Path, overrides: dict) -> Path:
         cfg["video_extraction"]["num_frames"] = overrides["frames"]
     if overrides.get("width") is not None:
         cfg["output"]["pano_width"] = overrides["width"]
+    if overrides.get("smoothing") is not None:
+        cfg["matching"]["rotation_smoothing_window"] = overrides["smoothing"]
     if overrides.get("no_closure"):
         cfg["matching"]["disable_circular_closure"] = True
     if overrides.get("debug"):
@@ -107,7 +120,8 @@ def build_config(video: Path, out_dir: Path, overrides: dict) -> Path:
         cfg["debug"]["save_matches"] = True
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    path = out_dir / "stitch-config.yaml"
+    # Absolute, because the subprocess runs with cwd set to the upstream directory.
+    path = (out_dir / "stitch-config.yaml").resolve()
     path.write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
     return path
 
@@ -140,9 +154,22 @@ def stitch(video: Path, out_dir: Path, **overrides) -> StitchResult:
 
     config_path = build_config(video, out_dir, overrides)
 
+    # Remove any previous result first. Success is judged by "a panorama exists"
+    # below, so a leftover file from an earlier run would be reported as a fresh
+    # success for a stitch that actually failed.
+    stale = _find_panorama(out_dir)
+    if stale is not None:
+        stale.unlink()
+
     # Run upstream as a subprocess rather than importing it: it manipulates sys.path
     # and configures the root logger, neither of which we want leaking into a
     # long-lived worker process.
+    # Force UTF-8 on the child too. Upstream's final success line contains a check
+    # mark, and on a cp1252 Windows console that raises inside the pipeline *after*
+    # it has already written the panorama -- turning a successful stitch into a
+    # non-zero exit code.
+    child_env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
+
     proc = subprocess.run(
         [sys.executable, str(run_py), str(config_path)],
         cwd=str(UPSTREAM),
@@ -150,17 +177,21 @@ def stitch(video: Path, out_dir: Path, **overrides) -> StitchResult:
         text=True,
         encoding="utf-8",
         errors="replace",
+        env=child_env,
     )
     if proc.stdout:
         print(proc.stdout, flush=True)
-    if proc.returncode != 0:
-        raise StitchError(_explain_failure(proc.stdout, proc.stderr))
 
+    # Judge on the artefact, not the exit code. Upstream can die on a cosmetic
+    # final print long after the panorama is safely on disk, and throwing away a
+    # good stitch over that would be absurd.
     panorama = _find_panorama(out_dir)
     if panorama is None:
-        raise StitchError(
-            "The pipeline reported success but produced no panorama file. "
-            f"Look in {out_dir} for what it did write."
+        raise StitchError(_explain_failure(proc.stdout, proc.stderr))
+    if proc.returncode != 0:
+        print(
+            f"[stitch] pipeline exited {proc.returncode} but wrote a panorama; keeping it.",
+            flush=True,
         )
 
     used = len(list((out_dir / "frames").glob("*"))) if (out_dir / "frames").exists() else 0
@@ -224,6 +255,7 @@ def main() -> int:
     ap.add_argument("--hfov", type=float, help="camera horizontal FOV in degrees (default 64)")
     ap.add_argument("--frames", type=int, help="frames to extract (default 48)")
     ap.add_argument("--width", type=int, help="panorama width in pixels (default 4096)")
+    ap.add_argument("--smoothing", type=int, help="rotation smoothing window (default 3)")
     ap.add_argument("--no-closure", action="store_true", help="the pan does not return to its start")
     ap.add_argument("--debug", action="store_true", help="save intermediate match visualisations")
     ap.add_argument("--clean", action="store_true", help="empty the output directory first")
@@ -236,6 +268,7 @@ def main() -> int:
         result = stitch(
             args.video, args.out,
             hfov=args.hfov, frames=args.frames, width=args.width,
+            smoothing=args.smoothing,
             no_closure=args.no_closure, debug=args.debug,
         )
     except StitchError as err:

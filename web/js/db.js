@@ -167,15 +167,38 @@ export async function enqueueVideo(roomId, storagePath, meta = {}) {
 
 /* --------------------------------------------------------------------- storage */
 
+/**
+ * Every path we generate is timestamped, so nothing here ever needs to overwrite.
+ * That matters: `upsert` makes storage treat the write as INSERT *or UPDATE*, and
+ * the raw-videos bucket is deliberately a write-only drop box with an INSERT-only
+ * policy. Sending upsert there fails with a row-level-security violation.
+ */
 async function upload(bucket, path, file, onProgress) {
   const { error } = await sb.storage.from(bucket).upload(path, file, {
     cacheControl: '3600',
-    upsert: true,
-    contentType: file.type || 'application/octet-stream',
+    upsert: false,
+    contentType: contentTypeOf(file),
   });
   if (error) throw error;
   onProgress?.(1);
   return path;
+}
+
+/**
+ * Each bucket has a MIME allow-list, and browsers do not always fill in `file.type`
+ * - an iPhone .mov picked from Files often arrives blank. Falling back to
+ * application/octet-stream would be rejected, so infer from the extension instead.
+ */
+const MIME_BY_EXT = {
+  mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime', qt: 'video/quicktime',
+  webm: 'video/webm', mkv: 'video/x-matroska',
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+  webp: 'image/webp', svg: 'image/svg+xml',
+};
+
+function contentTypeOf(file) {
+  if (file.type && file.type !== 'application/octet-stream') return file.type;
+  return MIME_BY_EXT[extOf(file, '')] || 'application/octet-stream';
 }
 
 /** Keep the original extension so the worker can pick the right decoder. */
@@ -221,6 +244,9 @@ export function humanError(err) {
   }
   if (/relation .* does not exist/i.test(msg)) {
     return 'The database tables are missing. Run supabase/schema.sql in the Supabase SQL editor.';
+  }
+  if (/mime type .* is not supported|InvalidMimeType/i.test(msg)) {
+    return 'That file type is not accepted. Room videos must be MP4, MOV, WebM or MKV; floor plans must be PNG, JPG, WebP or SVG.';
   }
   if (/exceeded the maximum allowed size|Payload too large/i.test(msg)) {
     return 'That file is larger than the Supabase upload limit. Trim the video or lower its resolution before uploading.';
