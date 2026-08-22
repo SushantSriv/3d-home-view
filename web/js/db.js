@@ -179,14 +179,17 @@ export async function enqueueVideo(roomId, storagePath, meta = {}) {
  * pushing 30 MB over a phone connection deserves better than a frozen button.
  * The endpoint and headers are exactly what supabase-js would have sent.
  */
-function upload(bucket, path, file, onProgress) {
+function upload(bucket, path, file, onProgress, contentType, upsert = false) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('POST', `${SUPABASE_URL}/storage/v1/object/${bucket}/${path}`);
     xhr.setRequestHeader('apikey', SUPABASE_ANON_KEY);
     xhr.setRequestHeader('Authorization', `Bearer ${SUPABASE_ANON_KEY}`);
-    xhr.setRequestHeader('Content-Type', contentTypeOf(file));
+    xhr.setRequestHeader('Content-Type', contentType || contentTypeOf(file));
     xhr.setRequestHeader('Cache-Control', '3600');
+    // Only panoramas overwrite: they use a fixed per-room key so re-doing a room
+    // replaces it. raw-videos must never set this - its policy is INSERT only.
+    if (upsert) xhr.setRequestHeader('x-upsert', 'true');
 
     xhr.upload.onprogress = (ev) => {
       if (ev.lengthComputable) onProgress?.(ev.loaded / ev.total);
@@ -239,6 +242,16 @@ export async function uploadFloorPlan(propertyId, file, onProgress) {
   return path;
 }
 
+/**
+ * A panorama prepared in the browser goes straight into the public bucket - there
+ * is nothing for the worker to do, so the room is finished the moment this returns.
+ */
+export async function uploadRoomPanorama(propertyId, roomId, blob, onProgress) {
+  const path = `${propertyId}/${roomId}.jpg`;
+  await upload(BUCKETS.panoramas, path, blob, onProgress, 'image/jpeg', true);
+  return path;
+}
+
 export async function uploadRoomVideo(propertyId, roomId, file, onProgress) {
   const path = `${propertyId}/${roomId}/${Date.now()}.${extOf(file, 'mp4')}`;
   await upload(BUCKETS.rawVideos, path, file, onProgress);
@@ -267,6 +280,9 @@ export function humanError(err) {
   }
   if (/Bucket not found/i.test(msg)) {
     return 'A storage bucket is missing. Create floor-plans, panoramas and raw-videos in the Supabase dashboard (see supabase/README.md).';
+  }
+  if (/column .* does not exist|Could not find the .* column/i.test(msg)) {
+    return 'The database is missing a newer column. Re-run supabase/schema.sql in the Supabase SQL editor - it is safe to run again and will not touch your data.';
   }
   if (/relation .* does not exist/i.test(msg)) {
     return 'The database tables are missing. Run supabase/schema.sql in the Supabase SQL editor.';

@@ -61,6 +61,13 @@ create index if not exists properties_published_idx  on public.properties(is_pub
 
 -- Columns added after the first release; harmless on a fresh database.
 alter table public.rooms       add column if not exists heading_offset integer not null default 0;
+-- Panorama geometry. A phone panorama photo is not a full sphere: it covers some
+-- horizontal sweep and a limited vertical band, and the viewer has to be told
+-- which, or it stretches the image over the whole sphere. 360/180/0 is a
+-- complete equirectangular panorama, which is what the video pipeline produces.
+alter table public.rooms       add column if not exists haov     real not null default 360;
+alter table public.rooms       add column if not exists vaov     real not null default 180;
+alter table public.rooms       add column if not exists v_offset real not null default 0;
 alter table public.room_videos add column if not exists duration_seconds numeric(8,2);
 alter table public.room_videos add column if not exists size_bytes bigint;
 alter table public.room_videos add column if not exists finished_at timestamptz;

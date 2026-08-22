@@ -161,6 +161,12 @@ async function enterRoom(roomId) {
   renderDock();
 
   mountViewer(panoramaUrl, {
+    // A panorama photo covers a band, not a sphere. Telling Pannellum the real
+    // angles makes it show clean empty space above and below instead of stretching
+    // an 86-degree-tall image over a full 180.
+    haov: room.haov ?? 360,
+    vaov: room.vaov ?? 180,
+    vOffset: room.v_offset ?? 0,
     hotSpots: bearings.map(({ room: target, yaw }) => ({
       pitch: -3,
       yaw,
@@ -219,8 +225,16 @@ function mountViewer(panoramaUrl, extra = {}) {
     minHfov: 50,
     maxHfov: 120,
     friction: 0.15,
+    backgroundColor: [0.07, 0.07, 0.09],
     ...extra,
   };
+  // Pannellum only accepts these together and rejects a full sphere declared
+  // partially, so drop them when the image really is 360x180.
+  if (config.haov >= 359.9 && config.vaov >= 179.9) {
+    delete config.haov;
+    delete config.vaov;
+    delete config.vOffset;
+  }
   // Only meaningful for remote images; setting it on a data: URL is pointless noise.
   if (/^https?:/i.test(panoramaUrl)) config.crossOrigin = 'anonymous';
 

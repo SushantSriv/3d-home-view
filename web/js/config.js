@@ -29,6 +29,8 @@ export const LIMITS = {
   maxImageBytes: 15 * 1024 * 1024,
   /** Videos shorter than this almost never have enough overlap to stitch. */
   minVideoSeconds: 12,
+  /** A panorama photo is wide but should still not be a 60 MB raw export. */
+  maxPanoramaBytes: 40 * 1024 * 1024,
 };
 
 /** True once the placeholders above have been replaced with a real project. */

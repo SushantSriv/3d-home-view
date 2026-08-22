@@ -261,7 +261,22 @@ function roomCard(room, i) {
     </div>
 
     <div class="field">
-      <label>Room video</label>
+      <label>Panorama photo &mdash; best quality, ready in seconds</label>
+      <div class="filepick">
+        <label class="btn sm primary">
+          <input class="f-photo" type="file" accept="image/*" hidden>
+          ${room.panorama_url ? 'Replace panorama' : 'Choose panorama'}
+        </label>
+        <span class="fname muted">Your phone's Panorama mode. Nothing to stitch, no waiting.</span>
+      </div>
+      <p class="muted" style="margin:.35rem 0 0;font-size:.78rem">
+        Stand in the middle, hold the phone <strong>upright</strong>, and sweep a full circle
+        following the on-screen guide.
+      </p>
+    </div>
+
+    <div class="field">
+      <label>&hellip;or a room video (slower, and harder to get right)</label>
       <div class="filepick">
         <label class="btn sm">
           <input class="f-video" type="file" accept="video/*" hidden>
@@ -341,6 +356,7 @@ function roomCard(room, i) {
   });
 
   node.querySelector('.f-video').onchange = guard((ev) => uploadVideo(room, ev.target));
+  node.querySelector('.f-photo').onchange = guard((ev) => uploadPanorama(room, ev.target));
 
   return node;
 }
@@ -392,6 +408,64 @@ async function uploadVideo(room, input) {
 
   await reload();
   flash(`"${room.label}" is queued. You can keep adding rooms, or close this page.`, 'ok');
+}
+
+/**
+ * A panorama photo needs no worker. The phone already did the stitching - far
+ * better than we could offline, because it had the gyroscope and live feedback -
+ * so all that is left is a projection conversion, which happens right here and
+ * cannot fail. The room is finished by the time this returns.
+ */
+async function uploadPanorama(room, input) {
+  const file = input.files[0];
+  if (!file) return;
+  if (file.size > LIMITS.maxPanoramaBytes) {
+    input.value = '';
+    throw new Error(
+      `That image is ${(file.size / 1048576).toFixed(0)} MB. Panoramas over ` +
+      `${LIMITS.maxPanoramaBytes / 1048576} MB are usually a mistake - export it smaller.`
+    );
+  }
+
+  const jobBox = input.closest('.room-item').querySelector('.job');
+  jobBox.innerHTML = `<div class="progress indeterminate"><i></i></div><p class="muted">Reading panorama&hellip;</p>`;
+  const note = jobBox.querySelector('p');
+
+  try {
+    const { preparePanorama } = await import('./pano.js');
+    const pano = await preparePanorama(file);
+
+    if (pano.vaov < 25) {
+      throw new Error(
+        'That looks like an ordinary photo rather than a panorama. Use your phone camera in ' +
+        'Panorama mode and sweep a full circle.'
+      );
+    }
+
+    note.textContent =
+      pano.source === 'photosphere'
+        ? `Photo Sphere, ${Math.round(pano.haov)}° wide. Uploading…`
+        : `Converted to equirectangular, ${Math.round(pano.vaov)}° tall. Uploading…`;
+
+    jobBox.querySelector('.progress').classList.remove('indeterminate');
+    const bar = jobBox.querySelector('.progress > i');
+
+    const path = await db.uploadRoomPanorama(property.id, room.id, pano.blob, (frac) => {
+      bar.style.width = `${Math.round(frac * 100)}%`;
+    });
+
+    Object.assign(room, await db.updateRoom(room.id, {
+      panorama_url: path,
+      haov: pano.haov,
+      vaov: pano.vaov,
+      v_offset: pano.vOffset,
+    }));
+  } finally {
+    input.value = '';
+  }
+
+  await reload();
+  flash(`"${room.label}" is ready. No stitching needed.`, 'ok');
 }
 
 /** Read a clip's duration without uploading it, so we can reject hopeless ones early. */
