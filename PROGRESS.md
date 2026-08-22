@@ -15,9 +15,9 @@ commit as the work it describes.
 | # | Milestone | Status | Notes |
 |---|---|---|---|
 | 0 | Repo, README, licenses, progress tracking | ✅ Done | git repo initialised, first commit made |
-| 1 | Stitching pipeline proof of concept | ✅ Done | Validated on a synthetic pan with known ground truth. See [section 6](#6-stitching-tuning-notes). |
+| 1 | Room capture → panorama | ✅ Done (photo) · ⚠️ poor (video) | Panorama-photo import works and is instant. Video stitching works on synthetic footage but not yet on real handheld clips — [section 6](#6-stitching-tuning-notes). |
 | 2 | Basic 360° viewer (Pannellum) | ✅ Done | Proven by the demo tour, no backend involved |
-| 3 | Upload flow (video → stitch → panorama URL) | ✅ Done | Full loop proven against the live project — see [section 6](#6-stitching-tuning-notes) |
+| 3 | Upload flow | ✅ Done | Both paths proven live: photo (browser-only, seconds) and video (queue → worker) |
 | 4 | Floor plan + click-to-place pins | 🟡 Built | Data path proven; the click-and-drag UI itself still wants a human test |
 | 5 | Connected viewer (floor plan ↔ 360° rooms) | ✅ Done | Demo tour walks four linked rooms |
 | 6 | Shareable public link + error handling | ✅ Done | Random 7-char slugs, publish toggle, `/tour/<slug>` pretty URLs |
@@ -64,19 +64,15 @@ be exercised offline.
 
 ## 3. What only you can do
 
-Everything that did not require your hands is done, including a full end-to-end proof of the
-pipeline. What genuinely remains:
+| # | Action | Why it needs you | Done? |
+|---|---|---|---|
+| 1 | **Shoot a room in Panorama mode** — stand in the middle, phone upright, sweep a full circle following the on-screen guide — and upload it under *Panorama photo*. | This is the path worth judging the product on. It needs a real room. | ⬜ |
+| 2 | **Place the pins and publish**, then open the share link on a phone. | The click-and-drag pin UI has still never been used by a human. | ⬜ |
+| 3 | *Optional:* a domain, if `sushantsriv.github.io/3d-home-view` is not good enough for a listing. | — | ⬜ |
 
-| # | Action | Why it needs you | Cost | Done? |
-|---|---|---|---|---|
-| 1 | **Record a real room video** — phone held **upright**, one slow full turn, 20–30 s, standing in one spot, framing furniture and edges rather than bare wall. | The pipeline is proven on synthetic footage. Rolling shutter, motion blur, dim light and blank walls are still untested. | free | ⬜ |
-| 2 | **Walk one tour through the studio by hand** at <https://sushantsriv.github.io/3d-home-view/studio.html> — upload a floor plan, drop and drag pins, upload that video. | I exercised the data path with direct API calls; the click-and-drag UI has never been touched by a human. | free | ⬜ |
-| 3 | **Delete the `Synthetic test room` tour** once you have a real one. | It is published on your live site as proof the loop works. | free | ⬜ |
-| 4 | *Optional:* buy a domain if `sushantsriv.github.io/3d-home-view` is not good enough for a finn.no listing. | — | ~$12/yr | ⬜ |
-
-**Already done and verified:** GitHub auth, public repo, Pages, both Actions secrets, Supabase
-schema, storage buckets and their policies, Python + virtualenv + dependencies, `.env`, the local
-worker, and the cloud worker.
+**Done and verified:** GitHub auth, public repo, Pages, Actions secrets, Supabase
+schema (including the panorama geometry columns), storage buckets and policies,
+Python environment, `.env`, the local worker, and the cloud worker.
 
 ### The anon key vs. the service key
 
@@ -138,89 +134,93 @@ a real listing, the next idea is to derive heading from the panorama itself.
 
 ---
 
-## 6. Stitching tuning notes
+## 6. Capture pipeline: what we learned
 
-**Milestone 1 is validated.** Not on a phone clip yet — on a synthetic one. `stitcher/make_test_video.py`
-builds a textured virtual room, renders the equirectangular panorama a perfect camera would see,
-then re-renders that as a handheld pan with pitch/roll wobble and auto-exposure drift. Because the
-ground truth is kept, the reconstruction can be judged rather than admired.
+### Two capture paths, and which to use
 
-### What was measured
+| | Panorama photo | Room video |
+|---|---|---|
+| Who stitches | your phone, live, with the gyroscope | us, offline, from features alone |
+| Time to ready | **seconds**, in the browser | ~55 s stitch + up to 5 min queue |
+| Vertical coverage | **~86°** | ~36 % of the sphere |
+| Failure modes | none — it is a projection conversion | many, see below |
+| Needs the worker | no | yes |
 
-| Run | Recovered rotation | Coverage | Result |
+**Use the photo path.** The video path is kept, demoted, and still useful if a
+phone has no panorama mode.
+
+### Why the video path struggles on real footage
+
+It works on synthetic footage and fails on a real living room, and the gap is
+instructive.
+
+- **Uneven panning.** A real 36-frame extraction gave steps of 5.3°–21.7° where
+  10° was expected. Nobody turns at a constant rate.
+- **Wobble.** Mean per-step angle was 13.4° against a 10° yaw step, so pitch and
+  roll jitter is comparable to the actual turn.
+- **More frames does not help.** 72 frames fixed every metric — suspicious pairs
+  21 → 2, zero failed matches, step range 1.5°–12.0° — and produced a *worse*
+  image, because wobble then dominates and the horizon snakes. Tested across
+  36/48/72 frames × smoothing 3/5/9; none was acceptable.
+
+### Two wrong turns, recorded so nobody repeats them
+
+**Back-solving the focal length from the sweep.** The pipeline reported 470° of
+yaw for one turn, so: closure proves it was one revolution, scale the focal
+length until the sweep reads 360. Measuring first killed it. On a synthetic pan
+of known geometry (true horizontal FOV 38.7°), telling the pipeline
+30/34/38.7/44/50 gave sweeps of 394/377/365/361/363 — the curve bottoms out near
+44 and turns back up, and the true FOV is nowhere near the 360 crossing. It
+would have converged confidently on the wrong lens.
+
+**Reading `det_raw` as a parallax signature.** Values of 1.5–1.7 looked like
+proof the camera was translating rather than rotating. The synthetic pan — camera
+provably at the origin in every frame — shows 1.50–1.56 as well. It tracks the
+step *angle*. Claim withdrawn.
+
+The lesson both times: measure against footage of known geometry before believing
+a diagnosis. `stitcher/make_test_video.py` exists for exactly that.
+
+### Settings that are actually justified
+
+| Setting | Ours | Upstream | Why |
 |---|---|---|---|
-| Landscape, `rotation_smoothing_window: 17` | — | 21.6 % | Heavy ghosting; every object doubled |
-| Landscape, window `3` | **362.0°** | 22.2 % | Sharp, correctly ordered walls |
-| **Portrait, window `3`** | **367.6°** | **36.0 %** | Sharp, and far more floor and ceiling |
+| `rotation_smoothing_window` | 3 | 17 (example) | Upstream averages rotation *matrices*, valid only for small angles. At our 10°/frame spacing, 17 spans ±60° and collapses the sweep: 21.6 % coverage and heavy ghosting, versus a clean stitch at 3. |
+| `num_frames` / `pano_width` | 36 / 3072 | 40 / 4096 | 77 s → 51 s measured, visually indistinguishable. |
+| `hfov_deg` | derived per video | fixed 42 | Horizontal FOV depends on how the phone was held: 64° landscape, 39° portrait. Using the landscape figure on a portrait clip reported 393° for one turn. `horizontal_fov()` derives it from frame shape. |
+| `match_full_res` | false @ 1280 | true | Video frames are softer than stills; much faster, nearly as accurate. |
+| `blending.method` | multiband | none | Auto-exposure always shifts panning past a window. |
 
-Closure validated in both good runs (frame 46/47 matched frame 0 with 101–336 inliers), so drift is
-being cancelled as intended.
+### Panorama photo conversion
 
-### Three findings that changed the defaults
+A phone panorama is *cylindrical*: vertical position goes as `tan(pitch)`, not
+`pitch`. `web/js/pano.js` remaps it to equirectangular in the browser, one output
+row at a time. Photo Sphere files are already equirectangular and carry GPano XMP
+metadata, so those are used as-is.
 
-**1. `rotation_smoothing_window` must scale with degrees-per-frame, not frames.** This was my bug.
-Upstream smooths by averaging rotation *matrices* across the window, which is only valid while those
-rotations are small. Their example uses `17` because their `interval` extraction produces ~375 frames
-about 1° apart. I switched to 48 uniform frames — 7.5° apart — where a window of 17 averages across
-±60° of yaw and collapses the sweep. Changing the extraction method silently invalidated their
-smoothing value. Now `3`, with the reasoning recorded next to it in `config.template.yaml`.
+Verified by round-tripping a known panorama through the exact algorithm: recovers
+`vaov` 86.01° against 86.00° true, 2.1 % mean absolute error.
 
-**2. Tell sellers to hold the phone upright.** A landscape 16:9 frame at 64° HFOV has only a 39°
-vertical field, so a single-height pan covers a ±19° band — 33 % of the sphere at best. Rotate the
-same phone and the tall axis carries the wide angle: 64° vertical, a ±32° band, 53 %. Measured
-22 % → 36 % actual panorama coverage from the identical scene. It is the cheapest quality win
-available and costs nothing but a sentence of guidance, now shown on the landing page and next to
-every video upload field.
-
-**3. `hfov_deg` must match the orientation.** Landscape ≈ 64, portrait ≈ 39. Get it wrong and the
-panorama either repeats itself or fails to close. This remains the first knob to turn on a bad stitch.
-
-### A fourth finding, from the first end-to-end run
-
-**The worker cannot ask the seller which way they held the phone, so it works it out.** The first
-real queue run stitched the portrait clip with the landscape default and reported **393°** of
-rotation for one full turn — a ~9 % over-rotation that shows up as a duplicated seam. `stitch_room.py`
-now derives the horizontal FOV from each video's frame shape (`horizontal_fov()`), assuming a 64°
-long-axis sensor: 1920×1080 → 64°, 1080×1920 → 38.7°, 1440×1920 → 50.2°. Re-running the identical
-job gave **367.6°**. Nobody has to configure anything.
-
-### Still open
-
-- **The uncovered band still looks bad.** Above and below the covered band the pipeline stretches
-  edge pixels into long vertical smears. Pannellum supports partial panoramas via `haov`/`vaov`/
-  `vOffset`; cropping the output to the genuinely covered band and declaring `vaov` would show clean
-  empty space instead of smear. Worth doing before anyone shows this to a buyer.
-- **Runtime:** ~70 s per room on 8 cores at 4096 px, 48 frames. Comfortable for a GitHub Actions run.
-- **Not yet tested on real footage:** rolling shutter, motion blur, low light, and blank Nordic walls
-  are all absent from the synthetic scene. Expect `min_inliers` to need attention on a real clip.
-
-### Defaults and why they differ from upstream
-
-| Setting | Ours | Upstream | Reason |
-|---|---|---|---|
-| `intrinsics.hfov_deg` | 64 (landscape) / 39 (portrait) | 42 | Phone *video* is cropped versus stills. Must match orientation. |
-| `matching.rotation_smoothing_window` | **3** | 17 (their example) | Measured above. Matrix averaging is only valid for small rotations. |
-| `video_extraction.method` | `uniform`, 48 frames | `interval`, every 2nd | A 25 s clip at 30 fps gives ~375 frames — minutes of matching for no gain. |
-| `matching.match_full_res` | `false` @ 1280 px | `true` | Video frames are softer than stills; much faster, nearly as accurate. |
-| `matching.min_inliers` | 90 | 200 | 200 is a high bar for a plain painted wall. |
-| `matching.use_clahe` | `true` | `false` | Buys back features in dim rooms. |
-| `disable_circular_closure` | `false` | `true` | A room pan returns to its start; detecting that cancels drift. |
-| `blending.method` | `multiband` | `none` | Auto-exposure always shifts panning past a window. |
+The viewer honours `haov`/`vaov`/`v_offset`, so a band renders as a band with
+clean empty space above and below rather than being stretched over a full sphere.
 
 ### Reproducing
 
 ```powershell
 .venv\Scripts\python.exe stitcher\make_test_video.py --out out\testroom --portrait --width 1080 --hfov 38.7
-.venv\Scripts\python.exe stitcher\stitch_room.py  --video out\testroom\pan.mp4 --out out\testroom\stitched --hfov 38.7
+.venv\Scripts\python.exe stitcher\stitch_room.py    --video out\testroom\pan.mp4 --out out\testroom\stitched
 ```
-
-Then compare `out\testroom\truth.jpg` against `out\testroom\stitched\panorama.jpg`, or load the
-result in the viewer with `tour.html?pano=<url>`.
 
 ---
 
 ## 7. Changelog
 
+- **2026-08-22 (capture rework)** — Real footage exposed that the video path does not
+  hold up: uneven panning and hand wobble, and raising the frame count fixes every metric
+  while making the image worse. Two plausible diagnoses were measured and discarded (see
+  section 6). Added panorama-photo import on the user's suggestion — the phone stitches it
+  live with the gyroscope, leaving only a projection conversion that runs in the browser in
+  seconds and cannot fail. Viewer now honours partial-panorama geometry.
 - **2026-08-22 (end of session)** — Proved the whole chain against the live project, twice: once
   with the local worker, once entirely on a GitHub runner with this machine uninvolved. Upload →
   queue → claim → stitch → upload → publish → fetched with no key. That run exposed the orientation
