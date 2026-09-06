@@ -6,12 +6,13 @@
  */
 
 import { SUPABASE_URL, SUPABASE_ANON_KEY, BUCKETS } from './config.js';
+import { createClient } from './api.js';
 
-const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2.58.0');
-
-export const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-  auth: { persistSession: false },
-});
+// A local client rather than supabase-js from a CDN. See api.js for why: this
+// module used to sit behind a top-level `await import('https://esm.sh/...')`,
+// which made every published listing link depend on a third party staying up
+// and put ~1 s of cross-origin fetches in front of the buyer's first paint.
+export const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 export { BUCKETS };
 
@@ -191,7 +192,11 @@ function upload(bucket, path, file, onProgress, contentType, upsert = false) {
     xhr.setRequestHeader('apikey', SUPABASE_ANON_KEY);
     xhr.setRequestHeader('Authorization', `Bearer ${SUPABASE_ANON_KEY}`);
     xhr.setRequestHeader('Content-Type', contentType || contentTypeOf(file));
-    xhr.setRequestHeader('Cache-Control', '3600');
+    // A bare number is not a Cache-Control directive, so Supabase discarded it
+    // and the CDN served no-cache - every room re-downloaded its panorama on
+    // every visit. Panorama paths carry a timestamp and are never rewritten, so
+    // they can be cached for a year.
+    xhr.setRequestHeader('Cache-Control', 'max-age=31536000, immutable');
     // Only panoramas overwrite: they use a fixed per-room key so re-doing a room
     // replaces it. raw-videos must never set this - its policy is INSERT only.
     if (upsert) xhr.setRequestHeader('x-upsert', 'true');
@@ -287,6 +292,24 @@ export function shareUrl(slug) {
  */
 export function humanError(err) {
   const msg = err?.message || String(err);
+
+  // Branch on status before text. api.js reports a dropped connection as
+  // ApiError('offline', 0, {code:'network'}), and without this the public
+  // landing page rendered the single word "offline" to a visitor.
+  if (err?.status === 0 || err?.code === 'network') {
+    return 'Your device could not reach the tour database. Check the connection and reload - the demo needs no connection at all.';
+  }
+  if (err?.status >= 500) {
+    return 'The database is not answering. A free Supabase project pauses after 7 days idle - open the dashboard and press Resume, then reload.';
+  }
+  if (err?.status === 429) {
+    return 'Too many requests in a short time. Wait a moment and try again.';
+  }
+  // A proxy or error page rather than PostgREST: never show raw markup.
+  if (/^\s*</.test(msg)) {
+    return 'The database returned something unexpected. Try again in a moment.';
+  }
+
   if (/Failed to fetch|NetworkError/i.test(msg)) {
     return 'Cannot reach the database. Check your connection - or the Supabase project may be paused (free projects pause after 7 days idle; open the dashboard and press Resume).';
   }

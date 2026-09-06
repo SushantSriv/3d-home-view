@@ -3,14 +3,47 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+
   <title>360&deg; Home Tour</title>
-  <meta name="description" content="Record one video per room, get one shareable 360 degree tour link.">
+  <meta name="description" content="Photograph each room with your phone's panorama mode, place the rooms on the floor plan, and share one link. Buyers walk the whole home in 360 degrees with no login and no app.">
+
+  <!-- Identity. The mark is a sweep with the circle left open at the upper right:
+       a phone panorama does not close, and the brand says so rather than pretending. -->
+  <link rel="icon" href="img/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="img/apple-touch-icon.png">
+  <meta name="theme-color" content="#0E1013" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#FAF9F7" media="(prefers-color-scheme: light)">
+
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="360&deg; Home Tour">
+  <meta property="og:title" content="Every room in 360&deg;. One link in the listing.">
+  <meta property="og:description" content="Photograph each room with your phone's panorama mode, place the rooms on the floor plan, and share one link. No login, no app.">
+  <meta property="og:url" content="https://sushantsriv.github.io/3d-home-view/">
+  <meta property="og:image" content="https://sushantsriv.github.io/3d-home-view/img/og-default.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta name="twitter:card" content="summary_large_image">
+
+  <!-- The published-tours list talks to Supabase; the handshake can start now
+       rather than after index.js has parsed. -->
+  <link rel="preconnect" href="https://ikuovilpewamyareelqm.supabase.co" crossorigin>
+  <link rel="modulepreload" href="js/index.js">
+  <link rel="modulepreload" href="js/config.js">
+  <link rel="modulepreload" href="js/db.js">
+  <link rel="modulepreload" href="js/api.js">
+
   <link rel="stylesheet" href="css/app.css">
 </head>
 <body>
 
   <header class="topbar">
-    <a class="brand" href="index.html">360<b>&deg;</b> Home Tour</a>
+    <a class="brand" href="index.html">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
+        <path d="M20.16 8.20 A 9 9 0 1 1 15.80 3.84" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        <circle cx="12" cy="12" r="2.6" fill="currentColor"/>
+      </svg>
+      <span>360<b>&deg;</b> Home Tour</span>
+    </a>
     <nav>
       <a class="btn sm" href="tour.html?demo=1">Demo</a>
       <a class="btn sm primary" href="studio.html">Studio</a>
@@ -19,44 +52,82 @@
 
   <main class="wrap">
 
-    <h1>One video per room. One link for the buyer.</h1>
-    <p class="muted" style="max-width:62ch;font-size:.95rem">
-      Record a slow pan of each room on your phone, upload the clips with a floor plan, and mark
-      where each room sits. Every clip is stitched into a 360&deg; panorama and the rooms are linked
-      into a single tour behind one address you can paste into a listing. Buyers need no login and
-      no app.
-    </p>
+    <section class="hero">
+      <div>
+        <h1>Every room in 360&deg;. One link in the listing.</h1>
+        <p class="lede">
+          Photograph each room with the panorama mode already on your phone, mark where you
+          stood on the floor plan, and you get a single address to paste into the listing.
+          Buyers open it and walk the home &mdash; no login, no app, nothing to install.
+        </p>
+        <div class="cta">
+          <a class="btn primary" href="studio.html">Build a tour</a>
+          <a class="btn" href="tour.html?demo=1">Open the full demo</a>
+        </div>
+      </div>
 
-    <p style="margin:1.4rem 0 2rem">
-      <a class="btn primary" href="tour.html?demo=1">Open the demo tour</a>
-      <a class="btn" href="studio.html">Build a tour</a>
-    </p>
+      <!-- Not a screenshot. This is the real viewer, running the demo tour, whose
+           panoramas are drawn in the browser and need no backend at all. -->
+      <div class="stack">
+        <div class="hero-demo">
+          <iframe src="tour.html?demo=1"
+                  title="Live demo tour: a sample apartment you can look around"
+                  loading="lazy"></iframe>
+          <span class="cap">Live demo</span>
+        </div>
+        <!-- The instruction lives under the frame rather than in the chip. Inside
+             the frame it is a fourth layer of chrome in a box that is only 310px
+             wide on a phone, and it landed on the viewer's own floor-plan dock. -->
+        <p class="muted">Drag inside the frame to look around, or open it full size.</p>
+      </div>
+    </section>
 
-    <div class="card">
-      <h2>Published tours</h2>
-      <div id="tours"><p class="muted">Loading&hellip;</p></div>
-    </div>
-
-    <div class="card">
-      <h2>How it works</h2>
-      <ol class="muted" style="padding-left:1.2rem;margin:0">
-        <li><strong>Capture</strong> &mdash; open the studio on your phone, press
-            <em>Capture 360&deg;</em>, and turn slowly on the spot. The phone's motion sensors tell
-            the app where each frame belongs, so a strip along the top fills in as you go and you
-            can see what is still missing. Hold the phone <strong>upright</strong> and turn about
-            your own axis rather than swinging it at arm's length.
-            <br>Already have a panorama photo? Upload that instead.</li>
-        <li><strong>Upload</strong> &mdash; drop in the clips plus a floor plan image.</li>
-        <li><strong>Pin</strong> &mdash; click the floor plan where each room is, name it, add the size in m&sup2; if you know it.</li>
-        <li><strong>Stitch</strong> &mdash; each clip becomes an equirectangular panorama. This runs offline, not in your browser.</li>
-        <li><strong>Share</strong> &mdash; publish, copy the link, paste it into the listing.</li>
+    <section class="card">
+      <h2>Three steps</h2>
+      <ol class="steps">
+        <li>
+          <h3>Photograph</h3>
+          <p>
+            Stand in the middle of the room, open your phone's <strong>Panorama</strong> mode and
+            turn slowly on the spot. A part-circle is fine &mdash; most phones stop near 230&deg;,
+            and the tour is built to show exactly as much as you captured.
+          </p>
+        </li>
+        <li>
+          <h3>Place on the plan</h3>
+          <p>
+            Upload the floor plan, then click the spot where you stood in each room. Give it a
+            name and the size in m&sup2;. That plan becomes the buyer's map, and the pins become
+            the doors they walk through.
+          </p>
+        </li>
+        <li>
+          <h3>Share one link</h3>
+          <p>
+            Publish, copy the link, paste it into the listing. One address covers the whole home,
+            it opens straight in the buyer's browser, and you can keep editing behind it.
+          </p>
+        </li>
       </ol>
-    </div>
+    </section>
 
-    <p class="muted" style="font-size:.8rem">
+    <section class="card">
+      <h2>Published tours</h2>
+      <div id="tours" aria-busy="true" aria-live="polite">
+        <p class="visually-hidden">Loading published tours&hellip;</p>
+        <div class="tourlist" aria-hidden="true">
+          <a><div class="skel line"></div><div class="skel line short"></div></a>
+          <a><div class="skel line"></div><div class="skel line short"></div></a>
+          <a><div class="skel line"></div><div class="skel line short"></div></a>
+        </div>
+      </div>
+    </section>
+
+    <p class="muted">
+      A set of linked 360&deg; panoramas, one per room &mdash; not a continuous 3D scan.
       Built on <a href="https://pannellum.org">Pannellum</a> and
       <a href="https://github.com/Kronbii/360-spherical-stitching">Kronbii/360-spherical-stitching</a>,
-      both MIT licensed. Not a continuous 3D scan &mdash; a set of linked 360&deg; panoramas, one per room.
+      both MIT licensed.
     </p>
 
   </main>

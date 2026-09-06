@@ -5,147 +5,238 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Studio &mdash; 360&deg; Home Tour</title>
   <meta name="robots" content="noindex">
+  <meta name="theme-color" content="#0E1013">
+  <link rel="icon" href="img/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="img/apple-touch-icon.png">
   <link rel="stylesheet" href="css/app.css">
+  <!-- The module graph is not walked by the preload scanner, so name it here. -->
+  <link rel="preconnect" href="https://ikuovilpewamyareelqm.supabase.co" crossorigin>
+  <link rel="modulepreload" href="js/config.js">
+  <link rel="modulepreload" href="js/floorplan.js">
+  <link rel="modulepreload" href="js/scale.js">
+  <link rel="modulepreload" href="js/db.js">
+  <link rel="modulepreload" href="js/api.js">
 </head>
 <body>
 
   <header class="topbar">
-    <a class="brand" href="index.html">360<b>&deg;</b> Home Tour</a>
+    <a class="brand" href="index.html">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M20.16 8.20 A 9 9 0 1 1 15.80 3.84" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        <circle cx="12" cy="12" r="2.6" fill="currentColor"/>
+      </svg>
+      360<b>&deg;</b> Home Tour
+    </a>
     <nav>
-      <a class="btn sm" href="tour.html?demo=1">Demo</a>
-      <a class="btn sm" href="index.html">Home</a>
+      <a class="btn sm ghost" href="tour.html?demo=1">Demo</a>
     </nav>
   </header>
 
   <main class="wrap">
     <h1>Studio</h1>
 
-    <div id="setup" class="banner hidden"></div>
-    <div id="flash" class="banner hidden"></div>
+    <div id="setup" class="banner hidden" role="status"></div>
 
-    <div id="app" class="hidden">
+    <!-- Boot skeleton. Painted immediately, so the first frame is never blank,
+         and swapped for the editor only once real data has arrived. -->
+    <div id="boot">
+      <div class="card" aria-hidden="true">
+        <div class="skel line short"></div>
+        <div class="skel line"></div>
+      </div>
+      <div class="card" aria-hidden="true">
+        <div class="skel line short"></div>
+        <div class="skel block"></div>
+        <div class="skel line"></div>
+      </div>
+      <p class="muted" role="status">Loading your properties&hellip;</p>
+    </div>
 
-      <!-- Property picker ------------------------------------------------ -->
-      <div class="card">
-        <div class="row">
-          <div>
-            <label for="prop-select">Property</label>
-            <select id="prop-select"></select>
-          </div>
-          <div class="none">
-            <button id="prop-new" class="btn">New property</button>
-          </div>
+    <!-- First run: no properties at all -------------------------------------- -->
+    <section id="welcome" class="card hidden" aria-labelledby="welcome-h">
+      <h2 id="welcome-h">Turn a viewing into one link</h2>
+      <p class="muted">
+        Photograph each room with your phone, drop a pin for it on the floor plan, and you get a
+        single public web address. Paste it into the listing. Buyers open it with no login and no
+        app, walking the home room by room.
+      </p>
+
+      <h3>What to have ready</h3>
+      <ul class="muted">
+        <li>A floor plan image &mdash; a screenshot of the listing plan is fine.</li>
+        <li>One panorama photo per room, from your phone's Panorama mode.</li>
+        <li>About ten minutes.</li>
+      </ul>
+
+      <ol class="steps">
+        <li>
+          <h3>Take the photos</h3>
+          <p>Stand in the middle of the room and sweep. A partial sweep is allowed.</p>
+        </li>
+        <li>
+          <h3>Place them on the plan</h3>
+          <p>Click the plan where each room is. Drag a pin to move it.</p>
+        </li>
+        <li>
+          <h3>Share the link</h3>
+          <p>Publish, copy, paste into the listing. Nothing to install.</p>
+        </li>
+      </ol>
+
+      <div class="row">
+        <button id="welcome-start" class="btn primary none" type="button">Create your first tour</button>
+        <a class="btn none" href="tour.html?demo=1">See the demo</a>
+      </div>
+    </section>
+
+    <!-- 1. Property ---------------------------------------------------------- -->
+    <div id="prop-card" class="card hidden">
+      <h2>Property</h2>
+
+      <div class="row">
+        <div class="field">
+          <label for="prop-select">Which property</label>
+          <select id="prop-select"></select>
         </div>
-
-        <form id="new-form" class="hidden" style="margin-top:.9rem">
-          <hr class="sep">
-          <div class="row">
-            <div class="field"><label for="new-name">Name</label>
-              <input id="new-name" type="text" placeholder="Solsiden 12B" required></div>
-            <div class="field"><label for="new-address">Address (optional)</label>
-              <input id="new-address" type="text" placeholder="0192 Oslo"></div>
-          </div>
-          <button class="btn primary" type="submit">Create</button>
-          <button id="new-cancel" class="btn" type="button">Cancel</button>
-        </form>
+        <button id="prop-new" class="btn none" type="button">New property</button>
       </div>
 
-      <!-- Editor ---------------------------------------------------------- -->
-      <div id="editor" class="hidden">
-
-        <!-- Always-visible share bar: the answer to "where do I open it?" -->
-        <div id="sharebar" class="sharebar">
-          <span id="share-state" class="pill">draft</span>
-          <span id="share-url" class="url">&mdash;</span>
-          <button id="share-copy" class="btn sm">Copy link</button>
-          <a id="share-open" class="btn sm primary" target="_blank" rel="noopener">Open tour</a>
+      <form id="new-form" class="hidden">
+        <hr class="sep">
+        <div class="row">
+          <div class="field">
+            <label for="new-name">Name</label>
+            <input id="new-name" type="text" placeholder="Solsiden 12B" autocomplete="off" required>
+          </div>
+          <div class="field">
+            <label for="new-address">Address (optional)</label>
+            <input id="new-address" type="text" placeholder="0192 Oslo" autocomplete="off">
+          </div>
         </div>
+        <div class="row">
+          <button id="new-submit" class="btn primary none" type="submit">Create</button>
+          <button id="new-cancel" class="btn none" type="button">Cancel</button>
+        </div>
+      </form>
 
-        <div class="studio-grid">
+      <div id="prop-details" class="hidden">
+        <hr class="sep">
+        <div class="row">
+          <div class="field">
+            <label for="p-name">Name</label>
+            <input id="p-name" type="text" autocomplete="off">
+          </div>
+          <div class="field">
+            <label for="p-address">Address</label>
+            <input id="p-address" type="text" autocomplete="off">
+          </div>
+        </div>
+        <p class="muted">These save as soon as you leave the field.</p>
+        <div class="row">
+          <button id="p-delete" class="btn sm danger none" type="button">Delete property</button>
+        </div>
+      </div>
+    </div>
 
-          <!-- left: plan -->
-          <section>
-            <div class="card">
-              <div class="spread" style="margin-bottom:.7rem">
-                <h2 class="grow" style="margin:0">Floor plan</h2>
-                <button id="add-room" class="btn sm">Add room</button>
-              </div>
-              <p id="plan-hint" class="muted" style="margin:0 0 .6rem">
-                Upload a floor plan, then press <em>Add room</em> and click where the room is.
-                Drag a pin to move it.
-              </p>
-              <div id="plan" class="floorplan"></div>
-              <div class="field" style="margin-top:.7rem">
-                <label>Floor plan image (PNG or JPG)</label>
-                <div class="filepick">
-                  <label class="btn sm">
-                    <input id="plan-file" type="file" accept="image/*" hidden>
-                    Choose image
-                  </label>
-                  <span class="fname muted">A screenshot of the listing plan is fine.</span>
-                </div>
-              </div>
+    <!-- 2. Plan, 3. Rooms, 4. Publish, 5. Share ------------------------------ -->
+    <div id="editor" class="hidden">
+      <div class="studio-grid">
+
+        <section class="col-plan" aria-labelledby="plan-h">
+          <div class="card">
+            <div class="spread">
+              <h2 id="plan-h" class="grow">Floor plan</h2>
+              <button id="add-room" class="btn sm primary" type="button">Add room</button>
             </div>
 
-            <div class="card">
-              <h2>Share</h2>
-              <label class="grow" style="margin:0;display:flex;gap:.5rem;align-items:center;cursor:pointer">
-                <input id="publish" type="checkbox" style="width:auto">
-                <span>Published &mdash; anyone with the link can view, no login</span>
-              </label>
-              <p class="muted" style="margin:.5rem 0 0">
-                Unpublished tours show visitors a "not published yet" notice instead of the rooms.
-              </p>
+            <p id="plan-hint" class="muted"></p>
+
+            <div id="plan" class="floorplan"></div>
+            <div id="plan-job"></div>
+
+            <div class="row">
+              <button id="place-centre" class="btn sm none hidden" type="button">Place in the middle instead</button>
             </div>
 
-            <div class="card">
-              <h2>Property</h2>
+            <!-- Inline room creation. Replaces two stacked prompt() dialogs. -->
+            <form id="room-form" class="hidden">
+              <hr class="sep">
+              <div class="field">
+                <label for="room-name">Room name</label>
+                <input id="room-name" type="text" placeholder="Living room" autocomplete="off" required>
+              </div>
+              <div class="field">
+                <div class="chipbar" id="room-chips" role="group" aria-label="Common room names"></div>
+              </div>
+              <div class="field">
+                <label for="room-size">Size in m&sup2; (optional)</label>
+                <input id="room-size" type="text" inputmode="decimal" placeholder="28,5" autocomplete="off">
+                <span class="hint">A comma is fine &mdash; 28,5 and 28.5 mean the same thing.</span>
+              </div>
               <div class="row">
-                <div class="field"><label for="p-name">Name</label><input id="p-name" type="text"></div>
-                <div class="field"><label for="p-address">Address</label><input id="p-address" type="text"></div>
+                <button id="room-save" class="btn primary none" type="submit">Add room</button>
+                <button id="room-cancel" class="btn none" type="button">Cancel</button>
               </div>
-              <button id="p-save" class="btn sm">Save</button>
-              <button id="p-delete" class="btn sm danger" style="float:right">Delete property</button>
+            </form>
+
+            <hr class="sep">
+
+            <div class="filepick">
+              <label class="btn sm">
+                <input id="plan-file" type="file" accept="image/*" class="visually-hidden">
+                Choose floor plan image
+              </label>
+              <span id="plan-name" class="fname muted">PNG or JPG. A screenshot of the listing plan is fine.</span>
             </div>
-          </section>
+          </div>
+        </section>
 
-          <!-- right: rooms -->
-          <section>
-            <div class="card">
-              <div class="spread" style="margin-bottom:.7rem">
-                <h2 class="grow" style="margin:0">Rooms</h2>
-                <button id="refresh" class="btn sm">Refresh</button>
-              </div>
-              <div id="rooms"></div>
+        <section class="col-rooms" aria-labelledby="rooms-h">
+          <div class="card">
+            <div class="spread">
+              <h2 id="rooms-h" class="grow">Rooms</h2>
+              <button id="refresh" class="btn sm ghost" type="button">Refresh</button>
             </div>
+            <p id="poll-note" class="muted hidden" role="status"></p>
+            <div id="rooms"></div>
+          </div>
 
-            <details class="card">
-              <summary style="cursor:pointer;font-weight:600">Getting the whole room</summary>
-              <p class="muted" style="margin:.7rem 0 .4rem">
-                <strong>Capture 360&deg;</strong> is the one to use. It runs the camera itself and
-                reads the phone's motion sensors, so it knows where every frame belongs instead of
-                guessing from the picture &mdash; and it keeps going until the strip along the top is
-                full, rather than stopping wherever the phone feels like. Stand in the middle, hold
-                the phone upright, turn slowly on the spot.
-              </p>
-              <p class="muted" style="margin:0 0 .4rem">
-                It needs a phone. Open the studio on the handset you are shooting with; a laptop has
-                no motion sensors and the button will say so.
-              </p>
-              <p class="muted" style="margin:0 0 .4rem">If you would rather use a photo you already have:</p>
-              <ol class="muted" style="padding-left:1.2rem;margin:0">
-                <li><strong>A photo sphere</strong> from the Google Street View app is read exactly
-                  as-is &mdash; it carries the true angles in its metadata, so nothing is inferred.</li>
-                <li><strong>Panorama mode</strong> usually gives up somewhere around 200&ndash;270&deg;.
-                  Pick two overlapping sweeps at once and they are joined, but overlap them by about a
-                  third or the join has nothing to lock on to.</li>
-                <li><strong>A partial view is allowed.</strong> The app measures what you actually
-                  captured and stops the viewer at the edges rather than inventing the rest.</li>
-              </ol>
-            </details>
-          </section>
+          <div class="card">
+            <h2>Publish</h2>
+            <p id="ready" class="muted"></p>
+            <label id="publish-label" class="btn block">
+              <input id="publish" type="checkbox">
+              Published
+            </label>
+            <p class="muted">
+              Anyone with the link can then view it &mdash; no login, no app. While it is unpublished,
+              visitors see a "not published yet" notice instead of the rooms.
+            </p>
+          </div>
 
-        </div>
+          <details class="card">
+            <summary><h2>Getting the whole room</h2></summary>
+            <ol class="muted">
+              <li><strong>A photo sphere</strong> from the Google Street View app is read exactly
+                as-is &mdash; it carries the true angles in its metadata, so nothing is inferred.</li>
+              <li><strong>Panorama mode</strong> usually gives up somewhere around 200&ndash;270&deg;.
+                Pick two overlapping sweeps at once and they are joined, but overlap them by about a
+                third or the join has nothing to lock on to.</li>
+              <li><strong>A partial view is allowed.</strong> The app measures what you actually
+                captured and stops the viewer at the edges rather than inventing the rest.</li>
+            </ol>
+          </details>
+        </section>
+
+      </div>
+
+      <!-- 5. Share: sticky, so the answer to "where do I open it?" never scrolls away -->
+      <div id="sharebar" class="sharebar">
+        <span id="share-state" class="pill">draft</span>
+        <label class="visually-hidden" for="share-url">Share link</label>
+        <input id="share-url" class="url" type="text" readonly value="">
+        <button id="share-copy" class="btn sm" type="button">Copy link</button>
+        <a id="share-open" class="btn sm primary" target="_blank" rel="noopener">Open tour</a>
       </div>
     </div>
   </main>

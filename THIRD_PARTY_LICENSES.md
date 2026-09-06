@@ -47,10 +47,29 @@ inside the submodule at `third_party/360-spherical-stitching/LICENSE`.
 
 ---
 
-## supabase-js
+## supabase-js — no longer used by the browser
 
-Client library, loaded at runtime from a CDN (not redistributed here).
-Upstream: https://github.com/supabase/supabase-js — MIT License.
+The web front end no longer loads supabase-js. `web/js/api.js` is a small
+hand-written PostgREST + Storage client, written for this project, because the
+library was only ever used for queries, one URL concatenation and one delete —
+uploads already went through raw XHR to get progress events. Importing it from a
+CDN cost 186 kB across 14 cross-origin modules and made every published listing
+link depend on a third party staying up.
+
+The Python worker still uses the `supabase` package (MIT); see below.
+
+---
+
+## Instrument Sans
+
+Display typeface, self-hosted in `web/vendor/fonts/` as two woff2 subsets of the
+variable font (41 kB total). No third-party connection at runtime.
+Upstream: https://fonts.google.com/specimen/Instrument+Sans
+
+Licensed under the SIL Open Font License 1.1. The OFL permits redistribution and
+web embedding of the font files provided they are not sold on their own and the
+licence travels with them; the full text is at
+https://openfontlicense.org/open-font-license-official-text/
 
 ---
 

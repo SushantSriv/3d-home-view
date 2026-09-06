@@ -4,6 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Not found &mdash; 360&deg; Home Tour</title>
+  <meta name="robots" content="noindex">
+  <meta name="description" content="That address does not exist on 360 Home Tour.">
   <script>
     /*
      * GitHub Pages has no server-side rewrites, so a pretty share link like
@@ -11,49 +13,131 @@
      * lands on this page. Translate it into the real URL and get out of the way,
      * before first paint, so the visitor never sees this page flash.
      *
-     * Styles are inlined and links are computed rather than linked relatively:
-     * 404.html is served for ANY unknown depth, so relative paths cannot be trusted.
+     * This must stay first in <head>, and it must stay cheap: everything below it
+     * is only for the case where this really is a wrong address.
      */
     (function () {
       var m = location.pathname.match(/^(.*?)\/tour\/([^/?#]+)\/?$/);
       if (m) {
         location.replace((m[1] || '') + '/tour.html?t=' + encodeURIComponent(m[2]) + location.hash);
+        return;
       }
+
+      /*
+       * This page answers for ANY unknown depth, so a relative <link rel=icon
+       * href="img/favicon.svg"> resolves against /a/b/ and the browser fetches a
+       * path that does not exist - a second 404 and a console error on top of
+       * the first. Work the site root out here, before the parser can start
+       * that request, and hand the same value to the script at the end of body
+       * so the icons and the links can never disagree about where home is.
+       */
+      var parts = location.pathname.split('/');
+      window.SITE_ROOT = location.hostname.endsWith('.github.io') && parts[1] ? '/' + parts[1] : '';
+
+      [['icon', '/img/favicon.svg', 'image/svg+xml'],
+       ['apple-touch-icon', '/img/apple-touch-icon.png', '']].forEach(function (spec) {
+        var link = document.createElement('link');
+        link.rel = spec[0];
+        link.href = window.SITE_ROOT + spec[1];
+        if (spec[2]) link.type = spec[2];
+        document.head.appendChild(link);
+      });
     })();
   </script>
+
+  <meta name="theme-color" content="#0E1013" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#FAF9F7" media="(prefers-color-scheme: light)">
+
   <style>
-    :root { color-scheme: dark light; }
+    /*
+     * Self-contained on purpose. 404.html is served for ANY unknown depth, so a
+     * relative <link> to css/app.css resolves to a path that does not exist and
+     * the page would arrive unstyled. These are the design-system token values,
+     * copied rather than imported, and nothing else.
+     */
+    :root {
+      color-scheme: dark;
+      --bg: #0e1013; --bg-elev-2: #1d2129;
+      --line-strong: #4a515e;
+      --text: #eceef2; --text-dim: #a2aab8;
+      --accent: #2fa192; --accent-ink: #04211e; --accent-text: #5fc7b8;
+      --focus: #5fc7b8;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        color-scheme: light;
+        --bg: #faf9f7; --bg-elev-2: #f1efeb;
+        --line-strong: #b9b4ac;
+        --text: #14161a; --text-dim: #5b6472;
+        --accent: #0e6e64; --accent-ink: #ffffff; --accent-text: #0b5b54;
+        --focus: #0e6e64;
+      }
+    }
+    *, *::before, *::after { box-sizing: border-box; }
     body {
-      margin: 0; min-height: 100vh; display: grid; place-items: center;
-      background: #0f1115; color: #e7e9ee; text-align: center; padding: 2rem;
-      font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      margin: 0; min-height: 100dvh;
+      display: grid; place-items: center;
+      padding: 2rem 1.5rem;
+      background: var(--bg); color: var(--text);
+      font: 1rem/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      -webkit-font-smoothing: antialiased;
     }
-    @media (prefers-color-scheme: light) { body { background: #f6f7f9; color: #171a21; } }
-    h1 { font-size: 1.6rem; letter-spacing: -.02em; margin: 0 0 .4rem; }
-    p { color: #9aa3b2; margin: 0 0 1.4rem; }
-    a {
-      display: inline-block; margin: 0 .2rem; padding: .5rem .85rem;
-      border: 1px solid #4f9cf9; border-radius: 8px;
-      color: #4f9cf9; text-decoration: none; font-size: .9rem;
+    main { max-width: 34rem; text-align: center; }
+    .mark { display: block; width: 40px; height: 40px; color: var(--accent-text); margin: 0 auto 1rem; }
+    h1 { font-size: 1.5rem; line-height: 1.15; letter-spacing: -.015em; margin: 0 0 .5rem; font-weight: 600; }
+    p { color: var(--text-dim); margin: 0 0 .75rem; }
+    #links { display: flex; gap: .75rem; flex-wrap: wrap; justify-content: center; margin-top: 1.5rem; }
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      min-height: 44px; padding: .55rem 1rem;
+      border: 1px solid var(--line-strong); border-radius: 8px;
+      background: var(--bg-elev-2); color: var(--text);
+      font-size: .875rem; font-weight: 600; line-height: 1.2;
+      text-decoration: none; white-space: nowrap;
+      -webkit-tap-highlight-color: transparent;
+      transition: background 120ms cubic-bezier(.2,.8,.2,1), transform 120ms cubic-bezier(.2,.8,.2,1);
     }
-    a.primary { background: #4f9cf9; color: #06264f; font-weight: 600; }
+    .btn:active { transform: translateY(1px); }
+    .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+    :focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; border-radius: 6px; }
+    @media (prefers-reduced-motion: reduce) { * { transition-duration: .01ms !important; } }
   </style>
 </head>
 <body>
   <main>
-    <h1>Page not found</h1>
-    <p>That address does not exist on this site.</p>
+    <svg class="mark" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
+      <path d="M20.16 8.20 A 9 9 0 1 1 15.80 3.84" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      <circle cx="12" cy="12" r="2.6" fill="currentColor"/>
+    </svg>
+    <h1>That address is not on this site</h1>
+    <p>
+      Nothing lives at <span id="where"></span>. If you were sent a tour link it may have been
+      cut short somewhere on its way &mdash; ask the estate agent to paste the whole link again.
+    </p>
+    <p>Tour links look like <strong>&hellip;/tour/abc1234</strong> and open straight into the home.</p>
     <p id="links"></p>
   </main>
+
   <script>
-    // Derive the site root from this page's own location so the links work whether
-    // the site is at example.github.io/repo/ or at a custom domain root.
+    // The site root was worked out in <head>, early enough to point the icons at
+    // it; reuse that value rather than deriving it a second time.
     (function () {
-      var parts = location.pathname.split('/');
-      var root = location.hostname.endsWith('.github.io') && parts[1] ? '/' + parts[1] : '';
-      document.getElementById('links').innerHTML =
-        '<a class="primary" href="' + root + '/">Home</a>' +
-        '<a href="' + root + '/tour.html?demo=1">Demo tour</a>';
+      var root = window.SITE_ROOT || '';
+
+      var where = document.getElementById('where');
+      var path = location.pathname.slice(root.length) || '/';
+      where.textContent = path.length > 48 ? path.slice(0, 45) + '\u2026' : path;
+
+      // Built as elements rather than as an innerHTML string: `root` comes from
+      // the URL, and a URL is not a place to trust quoting.
+      [['btn primary', '/', 'Back to the start'],
+       ['btn', '/tour.html?demo=1', 'Open the demo tour']].forEach(function (spec) {
+        var a = document.createElement('a');
+        a.className = spec[0];
+        a.href = root + spec[1];
+        a.textContent = spec[2];
+        document.getElementById('links').appendChild(a);
+      });
     })();
   </script>
 </body>

@@ -508,6 +508,90 @@ four different panorama geometries). **The ring rendering has not yet been seen 
 live viewer** — the property is currently unpublished, and I did not toggle that,
 since the share link is outward-facing.
 
+### The front-end overhaul
+
+Asked for: *"improve it by quite a lot, make it so better that it should be
+applauded, do live testing and whatever you wish, UI, i want to see a great
+working app."*
+
+Started with an eight-lens audit (seller journey, buyer journey, visual design,
+mobile, accessibility, robustness, performance, code health), each lens then
+attacked by an adversarial reviewer that dropped anything it could not reproduce
+in the file it cited. **147 findings survived**, collapsing to about 40 distinct
+defects. A published test property (`zztest01`, four rooms, one deliberately
+without a photo) was created so every claim could be checked against the real
+database rather than the demo.
+
+**The three that explained most of the "unfinished" feel:**
+
+1. **The studio scrolled sideways on a phone.** `@media (max-width:900px){
+   .studio-grid{grid-template-columns:1fr}}` — a bare `1fr` is `minmax(auto,1fr)`,
+   whose min-content floor was **461px inside a 390px screen**, so Chrome shrank
+   the whole page to 81%. One token: `minmax(0,1fr)`.
+2. **Every room card led with a blue primary button for the abandoned sensor
+   capture.** `capture.js` + `sphere.js` — 976 lines, 27% of `web/js` — reachable
+   from exactly one call site. Deleted; the panorama picker is now the single
+   primary action and the video path is behind an "experimental" disclosure.
+3. **Three layers of chrome in the viewer's top-left corner.** Pannellum ships
+   white 2011-era control boxes, `app.css` had *zero* `pnlm` rules, and they sat
+   half-clipped by the viewport under our own dark plaque. Hidden at source; the
+   viewer ships its own icon buttons.
+
+**A regression of mine, found by the audit.** The "fill the frame" zoom fix from
+the scale work set `maxHfov = fitHfov(vaov, aspect)`, and Pannellum re-clamps to
+that on every zoom. On a 390x844 phone with `vaov 68` that is **34.6°** — the
+buyer was locked into a magnified slab of wall and could not zoom out at all.
+The fix is structural rather than arithmetic: on an upright phone the panorama
+now gets a **4:3 stage** with the room chips and floor plan on a shelf beneath
+it, instead of the whole viewport. The same band then opens at about 84°, which
+both reads properly and fills the frame — and the space underneath became the
+navigation rather than dead letterbox.
+
+**supabase-js removed entirely.** `web/js/api.js` is a hand-written PostgREST +
+Storage client. The library was only ever used for queries, one URL concatenation
+and one delete — uploads already went through raw XHR for progress events — but
+it sat behind a top-level `await import('https://esm.sh/...')`, so `db.js` did not
+resolve until 14 cross-origin modules and 186 kB had loaded, and **every published
+listing link hard-depended on a third-party CDN staying up**. `getTourBySlug`
+against the live database now returns in **10 ms**. Nothing in `web/` reaches
+outside the origin any more.
+
+**Design system.** `app.css` rewritten around tokens: warm paper, ink and one
+fjord teal — deliberately not finn.no's blue, so a tour never looks like it is
+impersonating the portal. Light mode had never restated `--accent`/`--ok`/
+`--warn`/`--err`, which is why every call to action and status pill sat at
+2.0–2.8:1 in daylight, exactly when an agent is outside using it. Instrument Sans
+is self-hosted (41 kB, OFL). A brand mark was drawn: a sweep with the gap left
+open at the upper right, because a phone panorama does not close the circle.
+
+**Bugs I introduced in that rewrite and then found by testing:** `.brand` was a
+flex container, so the bare text around `<b>&deg;</b>` became separate anonymous
+items and the wordmark rendered as "360 ° Home Tour"; `label.btn` inherited the
+uppercase caption treatment and shouted "REPLACE PANORAMA"; `.floorplan .empty`
+and `.pin.empty` collided at equal specificity so a photo-less pin rendered as a
+36x170 box lying across the plan; and the narrow-portrait media query was
+declared *before* the `.tour-bar`/`.tour-dock` rules it had to override, so the
+phone shelf never appeared until the cascade order was fixed.
+
+**Verified live**, headless Edge, real data, measured inside a sized iframe
+because headless clamps `--window-size` to ~496px:
+
+| check | result |
+|---|---|
+| horizontal overflow, 3 pages x 360/390/430/1280 | `scrollWidth === clientWidth` everywhere |
+| chrome collisions | none (only chrome deliberately over the canvas) |
+| tap targets under `pointer:coarse` | all buttons >= 44px; pins 36px with a 52px hit area |
+| form controls below 16px | none that accept text |
+| embedded demo hijacking Back | fixed — `history.length` stays 2 |
+| landing demo renders | canvas present, plaque "Living Room 24.5 m² · 1/4" |
+
+**Still open:** `demo.js` costs 333 ms + 73 ms of main-thread time on the landing
+page (`canvas.toDataURL` plus a per-pixel grain loop) and is now on the critical
+path; the panorama preview/blur-up and WebP encoding from plan item 8 were not
+done; and the interface is still English — the plan argued for Norwegian, which
+is probably right for meglere and buyers, but that is a product decision to make
+deliberately rather than in passing.
+
 ### Reproducing
 
 ```powershell
@@ -519,6 +603,14 @@ since the share link is outward-facing.
 
 ## 7. Changelog
 
+- **2026-09-06 (front-end overhaul)** — Eight-lens audit with adversarial verification
+  produced 147 findings. Rewrote app.css as a token-based design system with a real light
+  mode, self-hosted Instrument Sans and a brand mark; rebuilt the landing page around a live
+  embedded demo; rebuilt the studio in job order with skeletons, card reconciliation that no
+  longer eats what you are typing, and rollback on every failed write; rebuilt the viewer with
+  a boxed stage on phones that fixes the 34.6° portrait keyhole, room chips, edge scrims and
+  its own chrome. Deleted the abandoned capture path (976 lines) and supabase-js (186 kB from
+  a CDN), replacing the latter with a 190-line local client.
 - **2026-08-22 (scale)** — Guided capture set aside; the single-panorama path gives the
   better image and partial rotation is accepted. Added real distances derived from the
   floor plane: a Scale toggle drawing distance rings, tap-to-measure, and a rough

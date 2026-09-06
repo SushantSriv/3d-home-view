@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+  <!-- The sweep, with the gap left open at the upper right: a phone panorama
+       does not close the circle, and the mark says so rather than pretending. -->
+  <path d="M20.16 8.20 A 9 9 0 1 1 15.80 3.84" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round"/>
+  <!-- Where the photographer stood. -->
+  <circle cx="12" cy="12" r="2.6" fill="currentColor"/>
+</svg>
